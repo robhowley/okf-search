@@ -67,6 +67,7 @@
     "url": "git+https://github.com/robhowley/okf-search.git",
     "directory": "packages/okf-search-native"
   },
+  "homepage": "https://github.com/robhowley/okf-search/tree/main/packages/okf-search-native#readme",
   "publishConfig": {
     "access": "public"
   },

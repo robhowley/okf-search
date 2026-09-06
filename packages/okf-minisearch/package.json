@@ -43,6 +43,7 @@
     "url": "git+https://github.com/robhowley/okf-search.git",
     "directory": "packages/okf-minisearch"
   },
+  "homepage": "https://github.com/robhowley/okf-search/tree/main/packages/okf-minisearch#readme",
   "license": "MIT",
   "engines": {
     "node": ">=20"
