@@ -90,4 +90,4 @@ The native backend must be built before running the extension from this checkout
 
 ## License
 
-MIT. See the repository [LICENSE](https://github.com/robhowley/okf-minisearch/blob/main/LICENSE).
+MIT. See the repository [LICENSE](https://github.com/robhowley/okf-search/blob/main/LICENSE).

@@ -64,7 +64,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/robhowley/okf-minisearch.git",
+    "url": "git+https://github.com/robhowley/okf-search.git",
     "directory": "packages/okf-search-native"
   },
   "publishConfig": {

@@ -1,8 +1,8 @@
-# okf-minisearch
+# okf-search
 
 `okf-minisearch` searches [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/open-knowledge-format) Markdown loaded from a Node.js directory, files selected in a browser, or Markdown already in memory. The companion `pi-okf-search` package retrieves ranked snippets from a configured local OKF directory through one read-only `okf_search` tool backed by a native Rust/Tantivy index.
 
-[![Package validation](https://github.com/robhowley/okf-minisearch/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robhowley/okf-minisearch/actions/workflows/ci.yml)
+[![Package validation](https://github.com/robhowley/okf-search/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robhowley/okf-search/actions/workflows/ci.yml)
 [![okf-minisearch on npm](https://img.shields.io/npm/v/okf-minisearch?logo=npm&label=okf-minisearch)](https://www.npmjs.com/package/okf-minisearch)
 [![pi-okf-search on npm](https://img.shields.io/npm/v/pi-okf-search?logo=npm&label=pi-okf-search)](https://www.npmjs.com/package/pi-okf-search)
 
@@ -61,7 +61,7 @@ Use `OkfMiniSearch` in your script. See the [browser guide](packages/okf-minisea
 
 ## Demo
 
-Try [okf-minisearch in your browser](https://robhowley.github.io/okf-minisearch/). Search a sample OKF corpus and validate Markdown uploads entirely in memory.
+Try [okf-minisearch in your browser](https://robhowley.com/okf-search/). Search a sample OKF corpus and validate Markdown uploads entirely in memory.
 
 ## Library capabilities
 
