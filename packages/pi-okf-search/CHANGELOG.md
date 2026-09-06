@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/robhowley/okf-search/compare/pi-okf-search-v0.4.0...pi-okf-search-v0.5.0) (2026-09-06)
+
+
+### Features
+
+* **pi-okf-search:** use native search backend ([#70](https://github.com/robhowley/okf-search/issues/70)) ([f2c6b66](https://github.com/robhowley/okf-search/commit/f2c6b66a3472a12e5ee340c88e9eb234af7f4373))
+
 ## [0.4.0](https://github.com/robhowley/okf-search/compare/pi-okf-search-v0.3.0...pi-okf-search-v0.4.0) (2026-08-30)
 
 
