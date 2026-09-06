@@ -14,40 +14,12 @@ This monorepo contains a native Rust/Tantivy search backend, the Pi package buil
 | Package | Use it for | Search engine |
 | --- | --- | --- |
 | [`okf-search-native`](packages/okf-search-native/README.md) | Node.js applications on a supported native platform | Rust and Tantivy |
-| [`pi-okf-search`](packages/pi-okf-search/README.md) | Searching a local OKF directory from [Pi](https://pi.dev/) | `okf-search-native` |
 | [`okf-minisearch`](packages/okf-minisearch/README.md) | Browser applications, or an ESM-only Node.js backend | MiniSearch |
+| [`pi-okf-search`](packages/pi-okf-search/README.md) | Searching a local OKF directory from [Pi](https://pi.dev/) | `okf-search-native` |
 
-Use `okf-search-native` for Node-only applications that can use its prebuilt native addons. Use `okf-minisearch` when you need browser support or `autoSuggest`. The backends share OKF preparation and validation behavior, but their ranking, scores, snippets, and fuzzy matches can differ.
+Use `okf-search-native` for Node-only applications that can use its prebuilt native addons. Use `okf-minisearch` when you need browser support. All three packages apply the same OKF parsing and validation rules. Their ranking, scores, snippets, and fuzzy matches can differ.
 
-## Use from Pi
-
-Install the package:
-
-```sh
-pi install npm:pi-okf-search
-```
-
-Add the directory to `~/.pi/agent/settings.json`:
-
-```json
-{
-  "pi-okf-search": {
-    "root": "/absolute/path/to/knowledge"
-  }
-}
-```
-
-Start Pi and ask it to search:
-
-```text
-Search the knowledge base to find the rollback procedure.
-```
-
-The package gives Pi one read-only `okf_search` tool. Results include the source path and inclusive line range so Pi can reopen the exact passage with `read`. Run `/okf status` to inspect the loaded snapshot and `/okf refresh` after files change.
-
-See the [`pi-okf-search` guide](packages/pi-okf-search/README.md) for configuration, query behavior, result interpretation, refreshes, and platform requirements.
-
-## Use the native Node.js backend
+## Use the Rust/Tantivy backend from Node.js
 
 ```sh
 npm install okf-search-native
@@ -92,6 +64,34 @@ Without a bundler, load its browser API from a CDN:
 ```
 
 See the [`okf-minisearch` guide](packages/okf-minisearch/README.md) for Node.js, browser, search, and auto-suggest examples.
+
+## Use from Pi
+
+Install the package:
+
+```sh
+pi install npm:pi-okf-search
+```
+
+Add the directory to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "pi-okf-search": {
+    "root": "/absolute/path/to/knowledge"
+  }
+}
+```
+
+Start Pi and ask it to search:
+
+```text
+Search the knowledge base to find the rollback procedure.
+```
+
+The package gives Pi one read-only `okf_search` tool. Results include the source path and inclusive line range so Pi can reopen the exact passage with `read`. Run `/okf status` to inspect the loaded snapshot and `/okf refresh` after files change.
+
+See the [`pi-okf-search` guide](packages/pi-okf-search/README.md) for configuration, query behavior, result interpretation, refreshes, and platform requirements.
 
 ## How the packages fit together
 
