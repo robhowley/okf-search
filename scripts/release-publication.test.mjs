@@ -174,7 +174,7 @@ function nativeManifest(overrides = {}) {
     devDependencies: { typescript: "1.0.0" },
     engines: { node: ">=22.19.0" },
     license: "MIT",
-    repository: { type: "git", url: "git+https://github.com/robhowley/okf-minisearch.git", directory: "packages/okf-search-native" },
+    repository: { type: "git", url: "git+https://github.com/robhowley/okf-search.git", directory: "packages/okf-search-native" },
     napi: { binaryName: "okf-search-native", targets: ["x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"] },
     ...overrides,
   }
@@ -438,7 +438,7 @@ test("native plan owner rejects invalid package files, identity, manifest contra
     ["package name", { manifest: nativeManifest({ name: "wrong" }) }, /package name/],
     ["package version", { manifest: nativeManifest({ version: "0.2.0" }) }, /package version/],
     ["private marker", { manifest: nativeManifest({ private: true }) }, /must not be private/],
-    ["repository and package directory", { manifest: nativeManifest({ repository: { type: "git", url: "git+https://github.com/robhowley/okf-minisearch.git", directory: "packages/wrong" } }) }, /repository metadata/],
+    ["repository and package directory", { manifest: nativeManifest({ repository: { type: "git", url: "git+https://github.com/robhowley/okf-search.git", directory: "packages/wrong" } }) }, /repository metadata/],
     ["root entrypoints", { manifest: nativeManifest({ main: "./wrong.cjs", module: "./wrong.mjs", types: "./wrong.d.ts" }) }, /actual.*expected|strictEqual/],
     ["exports", { manifest: nativeManifest({ exports: wrongExports }) }, /strictly deep-equal/],
     ["packed file declarations", { manifest: nativeManifest({ files: ["dist"] }) }, /strictly deep-equal/],
@@ -762,9 +762,9 @@ test("registry mode derives the exact native version from the selected plan", as
 function oidcToken(commit = releaseCommit) {
   const payload = Buffer.from(JSON.stringify({
     aud: "npm:registry.npmjs.org",
-    repository: "robhowley/okf-minisearch",
+    repository: "robhowley/okf-search",
     ref: "refs/heads/main",
-    workflow_ref: "robhowley/okf-minisearch/.github/workflows/release-please.yml@refs/heads/main",
+    workflow_ref: "robhowley/okf-search/.github/workflows/release-please.yml@refs/heads/main",
     sha: commit,
   })).toString("base64url")
   return `header.${payload}.signature`
@@ -1276,10 +1276,10 @@ function publicationFixture() {
     predicate: {
       buildDefinition: {
         buildType: "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
-        externalParameters: { workflow: { ref: "refs/heads/main", repository: "https://github.com/robhowley/okf-minisearch", path: ".github/workflows/release-please.yml" } },
-        resolvedDependencies: [{ uri: "git+https://github.com/robhowley/okf-minisearch@refs/heads/main", digest: { gitCommit: releaseCommit } }],
+        externalParameters: { workflow: { ref: "refs/heads/main", repository: "https://github.com/robhowley/okf-search", path: ".github/workflows/release-please.yml" } },
+        resolvedDependencies: [{ uri: "git+https://github.com/robhowley/okf-search@refs/heads/main", digest: { gitCommit: releaseCommit } }],
       },
-      runDetails: { builder: { id: "https://github.com/actions/runner/github-hosted" }, metadata: { invocationId: "https://github.com/robhowley/okf-minisearch/actions/runs/1/attempts/1" } },
+      runDetails: { builder: { id: "https://github.com/actions/runner/github-hosted" }, metadata: { invocationId: "https://github.com/robhowley/okf-search/actions/runs/1/attempts/1" } },
     },
   }
   const provenance = {

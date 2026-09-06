@@ -23,7 +23,7 @@ const TARGETS = [
 export const COMPRESSED_LIMIT = 12_000_000
 export const UNPACKED_LIMIT = 32_000_000
 export const NPM_OWNER = "robhowley"
-export const SOURCE_REPOSITORY = "https://github.com/robhowley/okf-minisearch"
+export const SOURCE_REPOSITORY = "https://github.com/robhowley/okf-search"
 export const PUBLICATION_WORKFLOW = ".github/workflows/release-please.yml"
 export const PROVENANCE_PREDICATE = "https://slsa.dev/provenance/v1"
 export const NATIVE_ARTIFACTS = Object.freeze(expectedArtifactNames({ napi: { targets: TARGETS } }))
@@ -110,7 +110,7 @@ function assertNativeManifest(manifest) {
   assert.equal(manifest.engines?.node, ">=22.19.0")
   assert.deepEqual(manifest.repository, {
     type: "git",
-    url: "git+https://github.com/robhowley/okf-minisearch.git",
+    url: "git+https://github.com/robhowley/okf-search.git",
     directory: "packages/okf-search-native",
   }, "native repository metadata")
   assert.equal(manifest.napi?.binaryName, "okf-search-native")
@@ -493,7 +493,7 @@ export async function runPublicationTransaction({
   if (missing.length > 0) {
     const token = await getOidc()
     verifyOidcToken(token, {
-      repository: "robhowley/okf-minisearch",
+      repository: "robhowley/okf-search",
       ref: "refs/heads/main",
       workflow: PUBLICATION_WORKFLOW,
       commit: plan.releaseCommit,

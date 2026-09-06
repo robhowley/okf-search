@@ -23,9 +23,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/robhowley/okf-minisearch.git",
+    "url": "git+https://github.com/robhowley/okf-search.git",
     "directory": "packages/pi-okf-search"
   },
+  "homepage": "https://github.com/robhowley/okf-search/tree/main/packages/pi-okf-search#readme",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
