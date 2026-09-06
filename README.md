@@ -1,30 +1,37 @@
 # okf-search
 
-`okf-minisearch` searches [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/open-knowledge-format) Markdown loaded from a Node.js directory, files selected in a browser, or Markdown already in memory. The companion `pi-okf-search` package retrieves ranked snippets from a configured local OKF directory through one read-only `okf_search` tool backed by a native Rust/Tantivy index.
+Search local [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/open-knowledge-format) Markdown from Pi, Node.js, or a browser.
+
+This monorepo contains a native Rust/Tantivy search backend, the Pi package built on it, and a JavaScript MiniSearch backend for browsers and Node.js. All three build in-memory indexes; no search service is required.
 
 [![Package validation](https://github.com/robhowley/okf-search/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robhowley/okf-search/actions/workflows/ci.yml)
-[![okf-minisearch on npm](https://img.shields.io/npm/v/okf-minisearch?logo=npm&label=okf-minisearch)](https://www.npmjs.com/package/okf-minisearch)
+[![okf-search-native on npm](https://img.shields.io/npm/v/okf-search-native?logo=npm&label=okf-search-native)](https://www.npmjs.com/package/okf-search-native)
 [![pi-okf-search on npm](https://img.shields.io/npm/v/pi-okf-search?logo=npm&label=pi-okf-search)](https://www.npmjs.com/package/pi-okf-search)
+[![okf-minisearch on npm](https://img.shields.io/npm/v/okf-minisearch?logo=npm&label=okf-minisearch)](https://www.npmjs.com/package/okf-minisearch)
 
-## Choose an entry point
+## Choose a package
 
-- **Node.js and browser users:** [`okf-minisearch`](packages/okf-minisearch/README.md) is the ESM library and TypeScript API.
-- **Pi users:** [`pi-okf-search`](packages/pi-okf-search/README.md) searches one configured local OKF tree from a Pi session.
-- **Contributors:** see [Development](#development) for workspace setup and checks.
+| Package | Use it for | Search engine |
+| --- | --- | --- |
+| [`okf-search-native`](packages/okf-search-native/README.md) | Node.js applications on a supported native platform | Rust and Tantivy |
+| [`okf-minisearch`](packages/okf-minisearch/README.md) | Browser applications, or an ESM-only Node.js backend | MiniSearch |
+| [`pi-okf-search`](packages/pi-okf-search/README.md) | Searching a local OKF directory from [Pi](https://pi.dev/) | `okf-search-native` |
 
-## Use from Node.js
+Use `okf-search-native` for Node-only applications that can use its prebuilt native addons. Use `okf-minisearch` when you need browser support. All three packages apply the same OKF parsing and validation rules. Their ranking, scores, snippets, and fuzzy matches can differ.
+
+## Use the Rust/Tantivy backend from Node.js
 
 ```sh
-npm install okf-minisearch
+npm install okf-search-native
 ```
 
 Given an OKF Markdown tree in `./knowledge`:
 
 ```js
-import { openOkf } from "okf-minisearch";
+import { openOkf } from "okf-search-native";
 
-const okf = await openOkf("./knowledge");
-const [hit] = okf.search("rollback snapshot", { limit: 1 });
+const index = await openOkf("./knowledge");
+const [hit] = index.search("rollback snapshot", { limit: 1 });
 
 if (!hit) throw new Error("No matches.");
 
@@ -38,52 +45,35 @@ console.log({
 });
 ```
 
-```text
-{
-  title: 'Database rollback',
-  path: 'runbooks/database-rollback.md',
-  headingPath: 'Database rollback > Restore snapshot',
-  startLine: 9,
-  endLine: 11,
-  snippet: 'Restore the last known-good snapshot, then verify application health.'
-}
+`okf-search-native` can also index Markdown already in memory, validate documents, add or replace documents, remove documents from the current index, and accept prepared documents through `okf-search-native/prepared`. See the [native package guide](packages/okf-search-native/README.md) for its complete API and supported platforms.
+
+## Use the JavaScript backend
+
+Install `okf-minisearch` for Node.js or a bundled browser application:
+
+```sh
+npm install okf-minisearch
 ```
 
-## Use in a browser
+Its package-root API also provides `openOkf`, `createOkfSearch`, document validation, in-memory updates, and search. It additionally supports browser-selected files and `autoSuggest`.
 
-Load the browser API without installing or bundling:
+Without a bundler, load its browser API from a CDN:
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/okf-minisearch@2"></script>
 ```
 
-Use `OkfMiniSearch` in your script. See the [browser guide](packages/okf-minisearch/README.md#browser) for file selection and search examples.
-
-## Demo
-
-Try [okf-minisearch in your browser](https://robhowley.com/okf-search/). Search a sample OKF corpus and validate Markdown uploads entirely in memory.
-
-## Library capabilities
-
-- Loads OKF Markdown from a Node.js directory, browser-selected files, or in-memory strings.
-- Returns one ranked section per document with its title, path, heading path, line range, and snippet.
-- Provides phrase-level `autoSuggest` completions; see the [library auto-suggest guide](packages/okf-minisearch/README.md#auto-suggest).
-- Filters by type, tags, status, trust tier, and staleness.
-- Provides `ingest` for add/replace updates and `remove` for explicit in-memory removal. Malformed replacements leave existing records searchable, and source files stay unchanged.
-
-```text
-OKF Markdown → openOkf() → in-memory MiniSearch index → relevant section
-```
+See the [`okf-minisearch` guide](packages/okf-minisearch/README.md) for Node.js, browser, search, and auto-suggest examples.
 
 ## Use from Pi
 
-Once `pi-okf-search` is available on npm, install it globally:
+Install the package:
 
 ```sh
 pi install npm:pi-okf-search
 ```
 
-Merge a root into `~/.pi/agent/settings.json` (use an absolute path for the clearest first setup):
+Add the directory to `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -93,49 +83,77 @@ Merge a root into `~/.pi/agent/settings.json` (use an absolute path for the clea
 }
 ```
 
-Start Pi with a search prompt:
+Start Pi and ask it to search:
 
-```sh
-pi "Search the knowledge base to find the rollback procedure."
+```text
+Search the knowledge base to find the rollback procedure.
 ```
 
-The model can call `okf_search`, inspect ranked snippets, and reopen a result's exact line range with Pi's `read` tool. See the [Pi package guide](packages/pi-okf-search/README.md) for global and project-local installation, settings precedence and trust, every search control, output interpretation, troubleshooting, and security limits.
+The package gives Pi one read-only `okf_search` tool. Results include the source path and inclusive line range so Pi can reopen the exact passage with `read`. Run `/okf status` to inspect the loaded snapshot and `/okf refresh` after files change.
 
-## Requirements and documentation
+See the [`pi-okf-search` guide](packages/pi-okf-search/README.md) for configuration, query behavior, result interpretation, refreshes, and platform requirements.
 
-- **Library:** ESM-only. Node.js usage requires Node.js 20 or newer; browser usage starts from files selected by the user.
-- **Pi package:** Node.js `>=22.19.0`. Its tests pin `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` `0.84.3`; the peer dependency ranges do not establish a narrower supported Pi version range.
-- **Pi package loading:** the package manifest exposes `./extensions/okf-search`; Pi discovers the extension entry point from that directory.
-- [Node.js package documentation](packages/okf-minisearch/README.md)
-- [Pi package documentation](packages/pi-okf-search/README.md)
-- [Pinned OKF v0.2 specification](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/ad30107c31c06aec8a7d5636e0d1058118604e6f/SPEC.md)
-- [MiniSearch documentation](https://lucaong.github.io/minisearch/)
+## How the packages fit together
+
+```text
+                         ┌─ okf-search-native ── Node.js
+OKF Markdown ─ preparation
+                         └─ okf-minisearch ───── Node.js or browser
+
+pi-okf-search ── okf-search-native ── okf_search tool in Pi
+```
+
+The public backends share the repository's OKF parsing, validation, document preparation, filters, and result model. When given a directory, they recursively load lowercase `.md` files, excluding files named exactly `index.md` and `log.md`. Search returns at most one best-matching section per document, and both strict and degraded OKF documents are searchable by default.
+
+Indexes remain in memory. Adding or removing a document changes the active index, not its source file. Reopening a directory rebuilds the index from disk.
+
+## Requirements
+
+| Package | Runtime |
+| --- | --- |
+| `okf-search-native` | Node.js `>=22.19.0`; macOS x64/arm64 and Linux x64 with glibc `>=2.17`; Windows x64 is experimental |
+| `pi-okf-search` | Node.js `>=22.19.0` and the same native platforms as `okf-search-native` |
+| `okf-minisearch` | Node.js `>=20` for directory loading, or a modern browser; ESM only |
+
+The native packages do not support browsers, Linux musl/Alpine, Linux arm64, or Windows arm64. Check the [native platform matrix](packages/okf-search-native/README.md#requirements-and-tested-platforms) before deploying.
+
+## Browser demo
+
+Try the [`okf-minisearch` browser demo](https://robhowley.com/okf-search/). It searches a sample corpus and validates selected Markdown entirely in memory.
 
 ## Development
 
-The full workspace requires Node.js `>=22.19.0` and pnpm `11.22.0`.
+The full workspace requires Node.js `>=22.19.0`, pnpm `11.22.0`, and Rust `1.88.0`.
 
 ```sh
 pnpm install
 pnpm package:check
 ```
 
-`pnpm package:check` performs a frozen install, builds, type-checks, tests, retains the demo check, and exercises packed Node, browser, and Pi consumers.
+`pnpm package:check` performs the full build, Rust checks, type checks, tests, and packed-package consumer checks.
 
-Build only the JavaScript library:
+Build and test one package with pnpm filters:
 
 ```sh
-pnpm --filter okf-minisearch build
+pnpm --filter okf-search-native build
+pnpm --filter okf-search-native test
+pnpm --filter okf-minisearch test
+pnpm --filter pi-okf-search test
 ```
 
-Run the Pi extension from this checkout:
+Run the Pi extension from this checkout after building the native backend:
 
 ```sh
 pnpm --filter okf-search-native build
 pi -e ./packages/pi-okf-search/extensions/okf-search/index.ts
 ```
 
-The native backend must be built before this local extension command. The Pi package has no build step; Pi loads its TypeScript source.
+## Learn about OKF
+
+- [OKF v0.2 specification](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/ad30107c31c06aec8a7d5636e0d1058118604e6f/SPEC.md)
+- [`okf-search-native` documentation](packages/okf-search-native/README.md)
+- [`pi-okf-search` documentation](packages/pi-okf-search/README.md)
+- [`okf-minisearch` documentation](packages/okf-minisearch/README.md)
 
 ## License
 
