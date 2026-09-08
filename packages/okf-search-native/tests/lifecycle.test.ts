@@ -22,6 +22,25 @@ describe("friendly root lifecycle", () => {
     expect(index.listTypes()).toEqual([]);
     expect(index.listDegradedDocuments()).toEqual([]);
     expect(index.search("anything")).toEqual([]);
+    expect(index.indexStats()).toMatchObject({
+      logical: {
+        documents: { total: 0, strict: 0, degraded: 0 },
+        types: [],
+        statuses: {
+          draft: 0,
+          stable: 0,
+          deprecated: 0,
+          unclassified: 0,
+        },
+        trustTiers: {
+          unverified: 0,
+          machineConfirmed: 0,
+          humanReviewed: 0,
+          unclassified: 0,
+        },
+      },
+      storage: { kind: "in-memory-index-files" },
+    });
     expect(index.remove("missing.md")).toBe(false);
     expect(() => index.autoSuggest("anything")).toThrowError(
       new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest"),
@@ -85,6 +104,7 @@ describe("friendly root lifecycle", () => {
     expect(index.search("oldneedle", { where: { tagsAny: ["caller-change"] } }))
       .toEqual([]);
     expect(index.search("changedneedle")).toEqual([]);
+    const beforeFailedReplacement = index.indexStats();
 
     expect(() => index.ingest({
       path: "a/./b.md",
@@ -96,6 +116,7 @@ describe("friendly root lifecycle", () => {
     }));
     expect(index.search("oldneedle")).toHaveLength(1);
     expect(index.search("replacementneedle")).toEqual([]);
+    expect(index.indexStats().logical).toEqual(beforeFailedReplacement.logical);
 
     const replacement = index.ingest({
       path: "a/./b.md",
@@ -105,6 +126,10 @@ describe("friendly root lifecycle", () => {
     expect(index.search("oldneedle")).toEqual([]);
     expect(index.search("newneedle")).toHaveLength(1);
     expect(index.listTypes()).toEqual(["replacement", "seed"]);
+    expect(index.indexStats().logical.types).toEqual([
+      { type: "replacement", documentCount: 1 },
+      { type: "seed", documentCount: 1 },
+    ]);
   });
 
   it("returns sorted detached inventories and removes all committed state", () => {
@@ -176,11 +201,19 @@ describe("friendly root lifecycle", () => {
     const originals = {
       ingest: prototype.ingestPrepared,
       search: prototype.search,
+      stats: prototype.indexStats,
       types: prototype.listTypes,
       degraded: prototype.listDegradedDocuments,
       remove: prototype.removeDocument,
     };
-    const calls = { ingest: 0, search: 0, types: 0, degraded: 0, remove: 0 };
+    const calls = {
+      ingest: 0,
+      search: 0,
+      stats: 0,
+      types: 0,
+      degraded: 0,
+      remove: 0,
+    };
 
     prototype.ingestPrepared = function () {
       calls.ingest += 1;
@@ -189,6 +222,10 @@ describe("friendly root lifecycle", () => {
     prototype.search = function (...args) {
       calls.search += 1;
       return originals.search.apply(this, args);
+    };
+    prototype.indexStats = function () {
+      calls.stats += 1;
+      return originals.stats.call(this);
     };
     prototype.listTypes = function () {
       calls.types += 1;
@@ -219,6 +256,7 @@ describe("friendly root lifecycle", () => {
       for (const call of [
         () => index.ingest({ path: "bad", markdown: "bad" }),
         () => index.listDegradedDocuments(),
+        () => index.indexStats(),
         () => index.listTypes(),
         () => index.remove("bad"),
         () => index.search("", { limit: -1 }),
@@ -230,6 +268,7 @@ describe("friendly root lifecycle", () => {
       expect(calls).toEqual({
         ingest: 1,
         search: 0,
+        stats: 0,
         types: 0,
         degraded: 0,
         remove: 0,
@@ -237,6 +276,7 @@ describe("friendly root lifecycle", () => {
     } finally {
       prototype.ingestPrepared = originals.ingest;
       prototype.search = originals.search;
+      prototype.indexStats = originals.stats;
       prototype.listTypes = originals.types;
       prototype.listDegradedDocuments = originals.degraded;
       prototype.removeDocument = originals.remove;

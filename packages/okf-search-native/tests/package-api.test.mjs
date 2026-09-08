@@ -170,6 +170,14 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
     preparedDocument("prepared", "prepared-runtime-marker"),
   ]);
   assert.equal(prepared.search("prepared-runtime-marker")[0]?.documentId, "prepared");
+  const preparedStats = prepared.indexStats();
+  assert.deepEqual(preparedStats.logical.documents, {
+    total: 1,
+    strict: 1,
+    degraded: 0,
+  });
+  assert.equal(preparedStats.storage.kind, "in-memory-index-files");
+  assert.ok(preparedStats.storage.indexFileBytes > 0);
   prepared.ingestPrepared(preparedDocument("prepared-added", "prepared-ingest-marker"));
   assert.equal(prepared.search("prepared-ingest-marker", { match: "all" }).length, 1);
   assert.equal(prepared.removeDocument("prepared-added"), true);

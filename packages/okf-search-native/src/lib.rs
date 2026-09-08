@@ -12,6 +12,7 @@ use napi::{Error, Result as NapiResult, Status};
 use napi_derive::napi;
 use parking_lot::Mutex;
 use tantivy::collector::{Count, TopDocs};
+use tantivy::directory::RamDirectory;
 use tantivy::query::{
     BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EnableScoring,
     FastFieldRangeQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery,
@@ -21,12 +22,15 @@ use tantivy::schema::{
     TextFieldIndexing, TextOptions, Value,
 };
 use tantivy::tokenizer::{LowerCaser, SimpleTokenizer, TextAnalyzer, TokenStream};
-use tantivy::{DocAddress, DocSet, Index, IndexReader, IndexWriter, ReloadPolicy, Score, Term};
+use tantivy::{
+    DocAddress, DocSet, Index, IndexReader, IndexSettings, IndexWriter, ReloadPolicy, Score, Term,
+};
 use thiserror::Error as ThisError;
 
 const TOKENIZER: &str = "okf";
 const WRITER_HEAP_BYTES: usize = 15_000_000;
 const FETCH_FLOOR: usize = 32;
+const MAX_SAFE_INTEGER: u128 = 9_007_199_254_740_991;
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -157,6 +161,69 @@ pub struct Suggestion {
     pub suggestion: String,
     pub terms: Vec<String>,
     pub score: f64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IndexDocumentStats {
+    pub total: f64,
+    pub strict: f64,
+    pub degraded: f64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IndexTypeStats {
+    #[napi(js_name = "type")]
+    pub document_type: String,
+    #[napi(js_name = "documentCount")]
+    pub document_count: f64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IndexStatusStats {
+    pub draft: f64,
+    pub stable: f64,
+    pub deprecated: f64,
+    pub unclassified: f64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IndexTrustTierStats {
+    pub unverified: f64,
+    #[napi(js_name = "machineConfirmed")]
+    pub machine_confirmed: f64,
+    #[napi(js_name = "humanReviewed")]
+    pub human_reviewed: f64,
+    pub unclassified: f64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct LogicalIndexStats {
+    pub documents: IndexDocumentStats,
+    pub types: Vec<IndexTypeStats>,
+    pub statuses: IndexStatusStats,
+    #[napi(js_name = "trustTiers")]
+    pub trust_tiers: IndexTrustTierStats,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IndexStorageStats {
+    #[napi(ts_type = "\"in-memory-index-files\"")]
+    pub kind: String,
+    #[napi(js_name = "indexFileBytes")]
+    pub index_file_bytes: f64,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IndexStats {
+    pub logical: LogicalIndexStats,
+    pub storage: IndexStorageStats,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -794,6 +861,8 @@ enum EngineError {
     #[error("[ERR_OKF_INDEX_UNUSABLE] {0}")]
     Poisoned(String),
     #[error("[ERR_OKF_NATIVE] {0}")]
+    UnsafeInteger(String),
+    #[error("[ERR_OKF_NATIVE] {0}")]
     Tantivy(#[from] tantivy::TantivyError),
 }
 
@@ -804,6 +873,8 @@ struct DocumentState {
     document_type: String,
     conformance: String,
     diagnostics: Vec<Diagnostic>,
+    status: Option<String>,
+    trust_tier: Option<String>,
     section_ids: BTreeSet<String>,
     section_count: usize,
 }
@@ -816,6 +887,8 @@ impl From<&PreparedDocument> for DocumentState {
             document_type: value.document_type.clone(),
             conformance: value.conformance.clone(),
             diagnostics: value.diagnostics.clone(),
+            status: value.status.clone(),
+            trust_tier: value.trust_tier.clone(),
             section_ids: value
                 .sections
                 .iter()
@@ -848,6 +921,9 @@ struct Candidate {
 
 struct Engine {
     _index: Index,
+    // This is a clone of the directory passed to `_index`; RamDirectory clones
+    // share the live file map, so telemetry observes the same files on demand.
+    ram_directory: RamDirectory,
     reader: IndexReader,
     writer: IndexWriter,
     fields: Fields,
@@ -863,7 +939,8 @@ impl Engine {
     fn new(documents: Vec<PreparedDocument>) -> Result<Self, EngineError> {
         validate_set(&documents)?;
         let (schema, fields) = schema();
-        let index = Index::create_in_ram(schema);
+        let ram_directory = RamDirectory::create();
+        let index = Index::create(ram_directory.clone(), schema, IndexSettings::default())?;
         index.tokenizers().register(TOKENIZER, analyzer());
         let mut writer = index.writer(WRITER_HEAP_BYTES)?;
         let mut states = BTreeMap::new();
@@ -879,6 +956,7 @@ impl Engine {
         reader.reload()?;
         Ok(Self {
             _index: index,
+            ram_directory,
             reader,
             writer,
             fields,
@@ -1025,6 +1103,97 @@ impl Engine {
         Ok(true)
     }
 
+    fn index_stats(&self) -> Result<IndexStats, EngineError> {
+        self.usable()?;
+
+        let mut strict = 0usize;
+        let mut degraded = 0usize;
+        let mut type_counts = BTreeMap::<String, usize>::new();
+        let mut draft = 0usize;
+        let mut stable = 0usize;
+        let mut deprecated = 0usize;
+        let mut status_unclassified = 0usize;
+        let mut unverified = 0usize;
+        let mut machine_confirmed = 0usize;
+        let mut human_reviewed = 0usize;
+        let mut trust_unclassified = 0usize;
+
+        for state in self.documents.values() {
+            match state.conformance.as_str() {
+                "strict" => strict += 1,
+                "degraded" => degraded += 1,
+                _ => {}
+            }
+            *type_counts.entry(state.document_type.clone()).or_default() += 1;
+
+            match state.status.as_deref() {
+                Some("draft") => draft += 1,
+                Some("stable") => stable += 1,
+                Some("deprecated") => deprecated += 1,
+                _ => status_unclassified += 1,
+            }
+            match state.trust_tier.as_deref() {
+                Some("unverified") => unverified += 1,
+                Some("machine-confirmed") => machine_confirmed += 1,
+                Some("human-reviewed") => human_reviewed += 1,
+                _ => trust_unclassified += 1,
+            }
+        }
+
+        Ok(IndexStats {
+            logical: LogicalIndexStats {
+                documents: IndexDocumentStats {
+                    total: usize_to_js_number(self.documents.len(), "document total")?,
+                    strict: usize_to_js_number(strict, "strict document count")?,
+                    degraded: usize_to_js_number(degraded, "degraded document count")?,
+                },
+                types: type_counts
+                    .into_iter()
+                    .map(|(document_type, document_count)| {
+                        Ok(IndexTypeStats {
+                            document_type,
+                            document_count: usize_to_js_number(
+                                document_count,
+                                "per-type document count",
+                            )?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, EngineError>>()?,
+                statuses: IndexStatusStats {
+                    draft: usize_to_js_number(draft, "draft document count")?,
+                    stable: usize_to_js_number(stable, "stable document count")?,
+                    deprecated: usize_to_js_number(deprecated, "deprecated document count")?,
+                    unclassified: usize_to_js_number(
+                        status_unclassified,
+                        "unclassified status count",
+                    )?,
+                },
+                trust_tiers: IndexTrustTierStats {
+                    unverified: usize_to_js_number(unverified, "unverified document count")?,
+                    machine_confirmed: usize_to_js_number(
+                        machine_confirmed,
+                        "machine-confirmed document count",
+                    )?,
+                    human_reviewed: usize_to_js_number(
+                        human_reviewed,
+                        "human-reviewed document count",
+                    )?,
+                    unclassified: usize_to_js_number(
+                        trust_unclassified,
+                        "unclassified trust-tier count",
+                    )?,
+                },
+            },
+            storage: IndexStorageStats {
+                kind: "in-memory-index-files".to_owned(),
+                index_file_bytes: usize_to_js_number(
+                    self.ram_directory.total_mem_usage(),
+                    "index file bytes",
+                )?,
+            },
+        })
+    }
+
     fn list_types(&self) -> Result<Vec<String>, EngineError> {
         self.usable()?;
         Ok(self
@@ -1156,6 +1325,15 @@ fn validate_set(documents: &[PreparedDocument]) -> Result<(), EngineError> {
         }
     }
     Ok(())
+}
+
+fn usize_to_js_number(value: usize, metric: &str) -> Result<f64, EngineError> {
+    if (value as u128) > MAX_SAFE_INTEGER {
+        return Err(EngineError::UnsafeInteger(format!(
+            "{metric} exceeds Number.MAX_SAFE_INTEGER: {value}"
+        )));
+    }
+    Ok(value as f64)
 }
 
 fn is_valid_line_number(value: f64) -> bool {
@@ -1503,9 +1681,10 @@ fn to_hit(
 fn native_error(error: EngineError) -> Error {
     let status = match &error {
         EngineError::Invalid(_) => Status::InvalidArg,
-        EngineError::StoredInvariant(_) | EngineError::Poisoned(_) | EngineError::Tantivy(_) => {
-            Status::GenericFailure
-        }
+        EngineError::StoredInvariant(_)
+        | EngineError::Poisoned(_)
+        | EngineError::UnsafeInteger(_)
+        | EngineError::Tantivy(_) => Status::GenericFailure,
     };
     Error::new(status, error.to_string())
 }
@@ -1550,6 +1729,11 @@ impl NativeOkfSearch {
         }
         let options = parse_search_options(options)?;
         self.inner.lock().search(&query, options)
+    }
+
+    #[napi(js_name = "indexStats")]
+    pub fn index_stats(&self) -> Result<IndexStats, Error> {
+        self.inner.lock().index_stats().map_err(native_error)
     }
 
     #[napi(js_name = "listTypes")]
@@ -1719,6 +1903,142 @@ mod tests {
             ),
         ])
         .expect("fixture should index")
+    }
+
+    #[test]
+    fn index_stats_count_each_logical_document_and_all_metadata_families() {
+        let engine = Engine::new(vec![
+            document_with_metadata(
+                "draft-machine",
+                "Note",
+                "strict",
+                &[],
+                Some("draft"),
+                None,
+                true,
+                Some("machine-confirmed"),
+                vec![section("draft-machine", "needle")],
+            ),
+            document_with_metadata(
+                "stable-human",
+                "note",
+                "strict",
+                &[],
+                Some("stable"),
+                None,
+                true,
+                Some("human-reviewed"),
+                vec![section("stable-human", "needle")],
+            ),
+            document_with_metadata(
+                "deprecated-unverified",
+                "Note",
+                "strict",
+                &[],
+                Some("deprecated"),
+                None,
+                true,
+                Some("unverified"),
+                vec![section("deprecated-unverified", "needle")],
+            ),
+            document_with_metadata(
+                "unclassified-status",
+                "Note",
+                "degraded",
+                &[],
+                None,
+                None,
+                false,
+                Some("human-reviewed"),
+                vec![section("unclassified-status", "needle")],
+            ),
+            document_with_metadata(
+                "unclassified-trust",
+                "Guide",
+                "degraded",
+                &[],
+                Some("stable"),
+                None,
+                false,
+                None,
+                vec![section("unclassified-trust", "needle")],
+            ),
+        ])
+        .expect("stats fixture should index");
+
+        let stats = engine.index_stats().expect("stats should succeed");
+        assert_eq!(stats.logical.documents.total, 5.0);
+        assert_eq!(stats.logical.documents.strict, 3.0);
+        assert_eq!(stats.logical.documents.degraded, 2.0);
+        assert_eq!(
+            stats
+                .logical
+                .types
+                .iter()
+                .map(|item| (item.document_type.as_str(), item.document_count))
+                .collect::<Vec<_>>(),
+            vec![("Guide", 1.0), ("Note", 3.0), ("note", 1.0)],
+        );
+        assert_eq!(stats.logical.statuses.draft, 1.0);
+        assert_eq!(stats.logical.statuses.stable, 2.0);
+        assert_eq!(stats.logical.statuses.deprecated, 1.0);
+        assert_eq!(stats.logical.statuses.unclassified, 1.0);
+        assert_eq!(stats.logical.trust_tiers.unverified, 1.0);
+        assert_eq!(stats.logical.trust_tiers.machine_confirmed, 1.0);
+        assert_eq!(stats.logical.trust_tiers.human_reviewed, 2.0);
+        assert_eq!(stats.logical.trust_tiers.unclassified, 1.0);
+    }
+
+    #[test]
+    fn index_stats_samples_the_live_ram_directory_and_tracks_successful_mutations() {
+        let mut engine =
+            Engine::new(vec![document(strict_section("first", "needle"))]).expect("baseline");
+        let initial = engine.index_stats().expect("initial stats");
+        assert_eq!(initial.storage.kind, "in-memory-index-files");
+        assert_eq!(
+            initial.storage.index_file_bytes,
+            engine.ram_directory.total_mem_usage() as f64
+        );
+        assert!(initial.storage.index_file_bytes > 0.0);
+        assert_eq!(initial.logical.documents.total, 1.0);
+
+        let mut invalid = document(strict_section("invalid", "needle"));
+        invalid.status = Some("future".to_owned());
+        engine
+            .ingest(invalid)
+            .expect_err("invalid document should be rejected");
+        let after_failed = engine.index_stats().expect("failed ingest stats");
+        assert_eq!(after_failed.logical.documents.total, 1.0);
+
+        let added = document_with_metadata(
+            "added",
+            "Note",
+            "degraded",
+            &[],
+            None,
+            None,
+            false,
+            None,
+            vec![section("added", "needle")],
+        );
+        engine
+            .ingest(added)
+            .expect("a valid degraded document should commit");
+        let after_ingest = engine.index_stats().expect("ingest stats");
+        assert_eq!(after_ingest.logical.documents.total, 2.0);
+        assert_eq!(
+            after_ingest.storage.index_file_bytes,
+            engine.ram_directory.total_mem_usage() as f64
+        );
+
+        engine.remove("added").expect("remove should commit");
+        let after_remove = engine.index_stats().expect("remove stats");
+        assert_eq!(after_remove.logical.documents.total, 1.0);
+        assert_eq!(after_remove.logical.documents.degraded, 0.0);
+        assert_eq!(
+            after_remove.storage.index_file_bytes,
+            engine.ram_directory.total_mem_usage() as f64
+        );
     }
 
     fn where_filter() -> SearchWhere {
@@ -2395,6 +2715,7 @@ mod tests {
 
         assert_napi_unusable(native.search("corruptneedle".to_owned(), None));
         assert_napi_unusable(native.search("healthy".to_owned(), None));
+        assert_napi_unusable(native.index_stats());
         assert_napi_unusable(native.list_types());
         assert_napi_unusable(native.list_degraded_documents());
         assert_napi_unusable(native.auto_suggest("healthy".to_owned(), None));

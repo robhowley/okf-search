@@ -117,6 +117,44 @@ export interface OkfDegradedDocument {
   readonly diagnostics: readonly [OkfDiagnostic, ...OkfDiagnostic[]];
 }
 
+export interface OkfLogicalIndexStats {
+  readonly documents: {
+    readonly total: number;
+    readonly strict: number;
+    readonly degraded: number;
+  };
+  readonly types: readonly {
+    readonly type: string;
+    readonly documentCount: number;
+  }[];
+  readonly statuses: {
+    readonly draft: number;
+    readonly stable: number;
+    readonly deprecated: number;
+    readonly unclassified: number;
+  };
+  readonly trustTiers: {
+    readonly unverified: number;
+    readonly machineConfirmed: number;
+    readonly humanReviewed: number;
+    readonly unclassified: number;
+  };
+}
+
+export type OkfIndexStorageStats =
+  | {
+      readonly kind: "in-memory-index-files";
+      readonly indexFileBytes: number;
+    }
+  | {
+      readonly kind: "unavailable";
+    };
+
+export interface OkfIndexStats {
+  readonly logical: OkfLogicalIndexStats;
+  readonly storage: OkfIndexStorageStats;
+}
+
 export type OkfConformance = "strict" | "degraded";
 
 export type OkfIngestResult =
@@ -165,6 +203,7 @@ export interface OkfSearchHit {
 }
 
 export interface OkfSearch {
+  indexStats(): OkfIndexStats;
   ingest(input: OkfDocumentInput): OkfIngestResult;
   listDegradedDocuments(): readonly OkfDegradedDocument[];
   listTypes(): readonly string[];

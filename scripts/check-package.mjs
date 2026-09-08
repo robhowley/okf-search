@@ -61,7 +61,10 @@ const nativeRootTypeExports = [
   "OkfErrorCode",
   "OkfExecutor",
   "OkfGeneration",
+  "OkfIndexStats",
+  "OkfIndexStorageStats",
   "OkfIngestResult",
+  "OkfLogicalIndexStats",
   "OkfParameter",
   "OkfSearch",
   "OkfSearchField",
@@ -788,7 +791,10 @@ import type {
   OkfErrorCode,
   OkfExecutor,
   OkfGeneration,
+  OkfIndexStats,
+  OkfIndexStorageStats,
   OkfIngestResult,
+  OkfLogicalIndexStats,
   OkfParameter,
   OkfSearch,
   OkfSearchField,
@@ -825,6 +831,10 @@ type ExactAutoSuggest = Assert<Same<
   OkfSearch["autoSuggest"],
   (query: string, options?: OkfSearchOptions) => never
 >>;
+type ExactIndexStats = Assert<Same<
+  OkfSearch["indexStats"],
+  () => OkfIndexStats
+>>;
 type ExactSearchField = Assert<Same<OkfSearchField,
   | "resource"
   | "title"
@@ -851,6 +861,7 @@ void [
   null as ExactErrorCode | null,
   null as ExactDiagnosticCode | null,
   null as ExactAutoSuggest | null,
+  null as ExactIndexStats | null,
   null as ExactSearchField | null,
   null as IsoDateTime | null,
   null as OkfAttester | null,
@@ -861,7 +872,9 @@ void [
   null as OkfDocumentInput | null,
   null as OkfExecutor | null,
   null as OkfGeneration | null,
+  null as OkfIndexStorageStats | null,
   null as OkfIngestResult | null,
+  null as OkfLogicalIndexStats | null,
   null as OkfParameter | null,
   null as OkfSearchHit | null,
   null as OkfSource | null,

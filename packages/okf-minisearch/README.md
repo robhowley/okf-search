@@ -174,6 +174,18 @@ const hits = okf.search("rollback", {
 
 The returned array is a frozen, sorted snapshot. Values preserve case and include custom types from both strict and degraded documents.
 
+### Index statistics
+
+Use `indexStats()` for one frozen snapshot of the current logical index:
+
+```js
+const stats = okf.indexStats();
+console.log(stats.logical.documents.total);
+console.log(stats.logical.types);
+```
+
+Logical counts include each document once across strict/degraded conformance, type, status, and effective trust-tier buckets. MiniSearch does not expose comparable index storage telemetry, so `stats.storage` is `{ kind: "unavailable" }`.
+
 ### Search fields
 
 | Public field | Indexed content | Default weight |
@@ -416,7 +428,7 @@ If `ingest` or `remove` throws `ERR_OKF_INDEX_UNUSABLE`, discard the handle and 
 
 ## Public API
 
-The package root exports `createOkfSearch`, `openOkf`, `validateOkfDocument`, and `OkfError`. Use `createOkfSearch(documents)` to build an `OkfSearch` synchronously from preloaded Markdown. `openOkf` builds one asynchronously from a Node directory path or browser `FileList`/`File[]`. Both return a handle with `search(query, options?)`, `autoSuggest(query, options?)`, `listTypes()`, `listDegradedDocuments()`, `ingest(input)`, and `remove(path)`. Public TypeScript types can be imported from the package root:
+The package root exports `createOkfSearch`, `openOkf`, `validateOkfDocument`, and `OkfError`. Use `createOkfSearch(documents)` to build an `OkfSearch` synchronously from preloaded Markdown. `openOkf` builds one asynchronously from a Node directory path or browser `FileList`/`File[]`. Both return a handle with `search(query, options?)`, `autoSuggest(query, options?)`, `listTypes()`, `indexStats()`, `listDegradedDocuments()`, `ingest(input)`, and `remove(path)`. Public TypeScript types can be imported from the package root:
 
 ```ts
 import type {
@@ -427,7 +439,10 @@ import type {
   OkfDiagnosticCode,
   OkfDocumentInput,
   OkfValidationResult,
+  OkfIndexStats,
+  OkfIndexStorageStats,
   OkfIngestResult,
+  OkfLogicalIndexStats,
   OkfSearch,
   OkfSearchField,
   OkfSearchHit,

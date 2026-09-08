@@ -3,6 +3,9 @@ import {
   createOkfSearch,
   openOkf,
   validateOkfDocument,
+  type OkfIndexStats,
+  type OkfIndexStorageStats,
+  type OkfLogicalIndexStats,
   type OkfSearch,
   type OkfSearchOptions,
   type OkfValidationResult,
@@ -23,6 +26,10 @@ type ExactPreparedRemove = Assert<Same<
 type ExactAutoSuggest = Assert<Same<
   OkfSearch["autoSuggest"],
   (query: string, options?: OkfSearchOptions) => never
+>>;
+type ExactIndexStats = Assert<Same<
+  OkfSearch["indexStats"],
+  () => OkfIndexStats
 >>;
 
 const error = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
@@ -45,5 +52,8 @@ void [
   validation,
   native,
   null as ExactAutoSuggest | null,
+  null as ExactIndexStats | null,
+  null as OkfIndexStorageStats | null,
+  null as OkfLogicalIndexStats | null,
   null as ExactPreparedRemove | null,
 ];

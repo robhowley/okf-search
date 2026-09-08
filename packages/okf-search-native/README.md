@@ -41,6 +41,7 @@ const document = {
 const validation = validateOkfDocument(document);
 const index = createOkfSearch([document]);
 const hits = index.search("memory", { limit: 10, fields: ["body"] });
+const stats = index.indexStats();
 
 const directoryIndex = await openOkf("./knowledge");
 directoryIndex.ingest({
@@ -65,6 +66,12 @@ Results contain at most one hit per document. Each hit represents its
 highest-ranked matching section and includes the document path, heading path,
 line range, matched fields, and snippet. The handle also provides `listTypes()`
 and `listDegradedDocuments()` for inspecting the current collection.
+
+`indexStats()` returns committed logical counts and native index-file telemetry.
+For this backend, `stats.storage.indexFileBytes` is the current sum of Tantivy
+`RamDirectory` file lengths; it is not total process memory and can change after
+merges or removals. The returned stats snapshot is detached and recursively
+frozen.
 
 ### Validation
 
@@ -95,6 +102,7 @@ import { NativeOkfSearch } from "okf-search-native/prepared";
 
 const index = NativeOkfSearch.fromPrepared(preparedDocuments);
 const hits = index.search("memory", { limit: 10, fields: ["body"] });
+const stats = index.indexStats();
 index.ingestPrepared(preparedDocument);
 index.removeDocument("docs/old");
 ```

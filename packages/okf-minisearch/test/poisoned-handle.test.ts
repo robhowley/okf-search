@@ -74,6 +74,7 @@ function expectEveryLaterOperationToRethrow(
   const calls: [string, () => unknown][] = [
     ["listDegradedDocuments", () => okf.listDegradedDocuments()],
     ["listTypes", () => okf.listTypes()],
+    ["indexStats", () => okf.indexStats()],
     ["search", () => okf.search("presentneedle")],
     ["autoSuggest", () => okf.autoSuggest("presentneedle", { limit: -1 })],
     ["malformed ingest", () => okf.ingest({

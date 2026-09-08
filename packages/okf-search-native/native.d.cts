@@ -10,6 +10,7 @@ export declare class NativeOkfSearch {
   ingestPrepared(document: PreparedDocument): void
   removeDocument(documentId: string): boolean
   search(query: string, options?: SearchOptions | undefined | null): Array<SearchHit>
+  indexStats(): IndexStats
   listTypes(): Array<string>
   listDegradedDocuments(): Array<DegradedDocument>
   /**
@@ -32,6 +33,48 @@ export interface Diagnostic {
   message: string
   field?: string
   path: string
+}
+
+export interface IndexDocumentStats {
+  total: number
+  strict: number
+  degraded: number
+}
+
+export interface IndexStats {
+  logical: LogicalIndexStats
+  storage: IndexStorageStats
+}
+
+export interface IndexStatusStats {
+  draft: number
+  stable: number
+  deprecated: number
+  unclassified: number
+}
+
+export interface IndexStorageStats {
+  kind: "in-memory-index-files"
+  indexFileBytes: number
+}
+
+export interface IndexTrustTierStats {
+  unverified: number
+  machineConfirmed: number
+  humanReviewed: number
+  unclassified: number
+}
+
+export interface IndexTypeStats {
+  type: string
+  documentCount: number
+}
+
+export interface LogicalIndexStats {
+  documents: IndexDocumentStats
+  types: Array<IndexTypeStats>
+  statuses: IndexStatusStats
+  trustTiers: IndexTrustTierStats
 }
 
 export interface PreparedDocument {

@@ -16,6 +16,9 @@ import type {
   OkfErrorCode,
   OkfExecutor,
   OkfGeneration,
+  OkfIndexStats,
+  OkfIndexStorageStats,
+  OkfLogicalIndexStats,
   OkfIngestResult,
   OkfParameter,
   OkfSearch,
@@ -91,6 +94,10 @@ type ExactAutoSuggest = Assert<Same<
   OkfSearch["autoSuggest"],
   (query: string, options?: OkfSearchOptions) => never
 >>;
+type ExactIndexStats = Assert<Same<
+  OkfSearch["indexStats"],
+  () => OkfIndexStats
+>>;
 
 const unsupported = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 const rootHandle: OkfSearch = createOkfSearch([]);
@@ -132,6 +139,9 @@ void [
   null as ExactSearchKeys | null,
   null as ExactWhereKeys | null,
   null as ExactAutoSuggest | null,
+  null as ExactIndexStats | null,
+  null as OkfIndexStorageStats | null,
+  null as OkfLogicalIndexStats | null,
   null as ExactPreparedRemove | null,
   null as IsoDateTime | null,
   null as OkfAttester | null,

@@ -20,6 +20,7 @@ import type {
   OkfErrorCode,
   OkfExecutor,
   OkfGeneration,
+  OkfIndexStats,
   OkfIngestResult,
   OkfParameter,
   OkfSearch,
@@ -85,6 +86,7 @@ describe("package API", () => {
     expect(okf.ingest).toBeTypeOf("function");
     expect(okf.listDegradedDocuments).toBeTypeOf("function");
     expect(okf.listTypes).toBeTypeOf("function");
+    expect(okf.indexStats).toBeTypeOf("function");
     expect(okf.remove).toBeTypeOf("function");
     expect(okf.search).toBeTypeOf("function");
     expect(okf.autoSuggest).toBeTypeOf("function");
@@ -106,6 +108,11 @@ describe("package API", () => {
     expect(result.document.id).toBe("package-api");
     expect(result.document.status).toBe("stable");
     expect(okf.listTypes()).toEqual(["note"]);
+    expect(okf.indexStats().logical.documents).toEqual({
+      total: 1,
+      strict: 1,
+      degraded: 0,
+    });
     expect(Object.keys(result)).toEqual(["conformance", "document"]);
     expect(Object.hasOwn(result, "records")).toBe(false);
     expect(Object.hasOwn(result, "diagnostics")).toBe(false);
@@ -410,6 +417,8 @@ describe("package API", () => {
       .toEqualTypeOf<() => readonly OkfDegradedDocument[]>();
     expectTypeOf<OkfSearch["listTypes"]>()
       .toEqualTypeOf<() => readonly string[]>();
+    expectTypeOf<OkfSearch["indexStats"]>()
+      .toEqualTypeOf<() => OkfIndexStats>();
     expectTypeOf<OkfSearch["remove"]>()
       .toEqualTypeOf<(path: string) => boolean>();
     expectTypeOf<OkfSearch["search"]>()
