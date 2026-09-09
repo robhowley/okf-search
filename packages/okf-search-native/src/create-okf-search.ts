@@ -13,11 +13,17 @@ import { sanitizeSearchOptions } from "./search-options.js";
 import type {
   PreparedOkfDocument,
 } from "@okf-internal/prepare";
-import type { SearchHit as NativeSearchHit } from "../native.cjs";
+import type {
+  IndexStats as NativeIndexStats,
+  SearchHit as NativeSearchHit,
+} from "../native.cjs";
 import type {
   OkfDegradedDocument,
   OkfDiagnostic,
   OkfDocumentInput,
+  OkfIndexStats,
+  OkfIndexStorageStats,
+  OkfLogicalIndexStats,
   OkfIngestResult,
   OkfSearch,
   OkfSearchField,
@@ -72,6 +78,11 @@ export function createOkfSearch(
   };
 
   return {
+    indexStats(): OkfIndexStats {
+      assertUsable();
+      return copyIndexStats(callNative("<index>", () => native.indexStats()));
+    },
+
     ingest(input): OkfIngestResult {
       assertUsable();
 
@@ -204,6 +215,41 @@ function copyNonEmptyDiagnostics(
     throw new Error("Degraded native documents must contain a diagnostic");
   }
   return [first, ...rest];
+}
+
+function copyIndexStats(stats: NativeIndexStats): OkfIndexStats {
+  const types = Object.freeze(
+    stats.logical.types
+      .map(({ type, documentCount }) =>
+        Object.freeze({ type, documentCount }))
+      .sort((left, right) => compare(left.type, right.type)),
+  );
+  const logical: OkfLogicalIndexStats = Object.freeze({
+    documents: Object.freeze({
+      total: stats.logical.documents.total,
+      strict: stats.logical.documents.strict,
+      degraded: stats.logical.documents.degraded,
+    }),
+    types,
+    statuses: Object.freeze({
+      draft: stats.logical.statuses.draft,
+      stable: stats.logical.statuses.stable,
+      deprecated: stats.logical.statuses.deprecated,
+      unclassified: stats.logical.statuses.unclassified,
+    }),
+    trustTiers: Object.freeze({
+      unverified: stats.logical.trustTiers.unverified,
+      machineConfirmed: stats.logical.trustTiers.machineConfirmed,
+      humanReviewed: stats.logical.trustTiers.humanReviewed,
+      unclassified: stats.logical.trustTiers.unclassified,
+    }),
+  });
+  const storage: OkfIndexStorageStats = Object.freeze({
+    kind: "in-memory-index-files" as const,
+    sizeInBytes: stats.storage.sizeInBytes,
+  });
+
+  return Object.freeze({ logical, storage });
 }
 
 function copySearchHit(hit: NativeSearchHit): OkfSearchHit {

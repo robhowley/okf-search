@@ -3,6 +3,9 @@ import {
   createOkfSearch,
   openOkf,
   validateOkfDocument,
+  type OkfIndexStats,
+  type OkfIndexStorageStats,
+  type OkfLogicalIndexStats,
   type OkfSearch,
   type OkfSearchOptions,
   type OkfValidationResult,
@@ -24,6 +27,26 @@ type ExactAutoSuggest = Assert<Same<
   OkfSearch["autoSuggest"],
   (query: string, options?: OkfSearchOptions) => never
 >>;
+type ExactIndexStats = Assert<Same<
+  OkfSearch["indexStats"],
+  () => OkfIndexStats
+>>;
+type ExactIndexStorageStats = Assert<Same<
+  OkfIndexStorageStats,
+  | {
+      readonly kind: "in-memory-index-files";
+      readonly sizeInBytes: number;
+    }
+  | {
+      readonly kind: "serialized-index";
+      readonly format: "minisearch-json-utf8";
+      readonly sizeInBytes: number;
+    }
+>>;
+type ExactIndexStorageSize = Assert<Same<
+  OkfIndexStats["storage"]["sizeInBytes"],
+  number
+>>;
 
 const error = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 const rootHandle: OkfSearch = createOkfSearch([]);
@@ -32,6 +55,8 @@ const validation: OkfValidationResult = validateOkfDocument({
   path: "types.md",
   markdown: "---\ntype: note\n---\n",
 });
+declare const stats: OkfIndexStats;
+const sizeInBytes: number = stats.storage.sizeInBytes;
 declare const prepared: PreparedDocument[];
 const native = NativeOkfSearch.fromPrepared(prepared);
 native.removeDocument("prepared");
@@ -45,5 +70,11 @@ void [
   validation,
   native,
   null as ExactAutoSuggest | null,
+  null as ExactIndexStats | null,
+  null as ExactIndexStorageStats | null,
+  null as ExactIndexStorageSize | null,
+  null as OkfIndexStorageStats | null,
+  sizeInBytes,
+  null as OkfLogicalIndexStats | null,
   null as ExactPreparedRemove | null,
 ];

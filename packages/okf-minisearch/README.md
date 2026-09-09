@@ -174,6 +174,45 @@ const hits = okf.search("rollback", {
 
 The returned array is a frozen, sorted snapshot. Values preserve case and include custom types from both strict and degraded documents.
 
+### Index statistics
+
+`indexStats()` returns a detached, recursively frozen snapshot:
+
+```ts
+{
+  logical: {
+    documents: {
+      total: number;
+      strict: number;
+      degraded: number;
+    };
+    types: readonly {
+      type: string;
+      documentCount: number;
+    }[];
+    statuses: {
+      draft: number;
+      stable: number;
+      deprecated: number;
+      unclassified: number;
+    };
+    trustTiers: {
+      unverified: number;
+      machineConfirmed: number;
+      humanReviewed: number;
+      unclassified: number;
+    };
+  };
+  storage: {
+    kind: "serialized-index";
+    format: "minisearch-json-utf8";
+    sizeInBytes: number;
+  };
+}
+```
+
+Logical values count documents, not sections, and change only after a successful `ingest` or `remove`. `types` preserves case and is sorted by type. Missing effective status or trust-tier metadata counts as `unclassified`. `sizeInBytes` is the UTF-8 byte length of `JSON.stringify` for the current MiniSearch index. It is calculated lazily on the first `indexStats()` call and after each successful mutation, rather than during indexing.
+
 ### Search fields
 
 | Public field | Indexed content | Default weight |
@@ -416,7 +455,7 @@ If `ingest` or `remove` throws `ERR_OKF_INDEX_UNUSABLE`, discard the handle and 
 
 ## Public API
 
-The package root exports `createOkfSearch`, `openOkf`, `validateOkfDocument`, and `OkfError`. Use `createOkfSearch(documents)` to build an `OkfSearch` synchronously from preloaded Markdown. `openOkf` builds one asynchronously from a Node directory path or browser `FileList`/`File[]`. Both return a handle with `search(query, options?)`, `autoSuggest(query, options?)`, `listTypes()`, `listDegradedDocuments()`, `ingest(input)`, and `remove(path)`. Public TypeScript types can be imported from the package root:
+The package root exports `createOkfSearch`, `openOkf`, `validateOkfDocument`, and `OkfError`. Use `createOkfSearch(documents)` to build an `OkfSearch` synchronously from preloaded Markdown. `openOkf` builds one asynchronously from a Node directory path or browser `FileList`/`File[]`. Both return a handle with `search(query, options?)`, `autoSuggest(query, options?)`, `listTypes()`, `indexStats()`, `listDegradedDocuments()`, `ingest(input)`, and `remove(path)`. Public TypeScript types can be imported from the package root:
 
 ```ts
 import type {
@@ -427,7 +466,10 @@ import type {
   OkfDiagnosticCode,
   OkfDocumentInput,
   OkfValidationResult,
+  OkfIndexStats,
+  OkfIndexStorageStats,
   OkfIngestResult,
+  OkfLogicalIndexStats,
   OkfSearch,
   OkfSearchField,
   OkfSearchHit,

@@ -41,6 +41,7 @@ const document = {
 const validation = validateOkfDocument(document);
 const index = createOkfSearch([document]);
 const hits = index.search("memory", { limit: 10, fields: ["body"] });
+const stats = index.indexStats();
 
 const directoryIndex = await openOkf("./knowledge");
 directoryIndex.ingest({
@@ -65,6 +66,48 @@ Results contain at most one hit per document. Each hit represents its
 highest-ranked matching section and includes the document path, heading path,
 line range, matched fields, and snippet. The handle also provides `listTypes()`
 and `listDegradedDocuments()` for inspecting the current collection.
+
+### Index statistics
+
+`indexStats()` returns a detached, recursively frozen snapshot:
+
+```ts
+{
+  logical: {
+    documents: {
+      total: number;
+      strict: number;
+      degraded: number;
+    };
+    types: readonly {
+      type: string;
+      documentCount: number;
+    }[];
+    statuses: {
+      draft: number;
+      stable: number;
+      deprecated: number;
+      unclassified: number;
+    };
+    trustTiers: {
+      unverified: number;
+      machineConfirmed: number;
+      humanReviewed: number;
+      unclassified: number;
+    };
+  };
+  storage: {
+    kind: "in-memory-index-files";
+    sizeInBytes: number;
+  };
+}
+```
+
+Logical values count documents, not sections, and change only after a successful
+`ingest` or `remove`. `types` preserves case and is sorted by type. Missing
+effective status or trust-tier metadata counts as `unclassified`.
+`sizeInBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
+process memory and can change without a logical change.
 
 ### Validation
 
@@ -95,6 +138,7 @@ import { NativeOkfSearch } from "okf-search-native/prepared";
 
 const index = NativeOkfSearch.fromPrepared(preparedDocuments);
 const hits = index.search("memory", { limit: 10, fields: ["body"] });
+const stats = index.indexStats();
 index.ingestPrepared(preparedDocument);
 index.removeDocument("docs/old");
 ```
@@ -104,7 +148,8 @@ replaces every indexed section owned by one document, and `removeDocument`
 removes them together. `PreparedDocument` contains document-wide metadata once;
 each `PreparedSection` contains only its ID, heading path, text, and line
 bounds. The DTO declarations are exported from `okf-search-native/prepared`,
-not from the package root.
+not from the package root. Its `indexStats()` result has the shape above but is
+a mutable N-API DTO; the package-root adapter returns the frozen copy.
 
 ## Requirements and tested platforms
 

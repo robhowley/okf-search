@@ -66,6 +66,162 @@ describe("validateOkfDocument", () => {
 });
 
 describe("friendly search behavior", () => {
+  it("reports one logical document per state with every stats family", () => {
+    const index = createOkfSearch([
+      {
+        path: "draft-machine.md",
+        markdown: concept(
+          "type: Note\nstatus: draft\nverified:\n  by: process:builder\n  at: 2026-08-24T10:00:00Z",
+          "draft machine",
+        ),
+      },
+      {
+        path: "stable-human.md",
+        markdown: concept(
+          "type: note\nstatus: stable\nverified:\n  by: human:reviewer\n  at: 2026-08-24T10:00:00Z",
+          "stable human",
+        ),
+      },
+      {
+        path: "deprecated-unverified.md",
+        markdown: concept(
+          "type: Note\nstatus: deprecated",
+          "deprecated unverified",
+        ),
+      },
+      {
+        path: "unclassified-status.md",
+        markdown: concept(
+          "type: Note\nstatus: future\nverified:\n  by: human:reviewer\n  at: 2026-08-24T10:00:00Z",
+          "unclassified status",
+        ),
+      },
+      {
+        path: "unclassified-trust.md",
+        markdown: concept(
+          "type: Guide\nstatus: stable\nverified: malformed",
+          "unclassified trust",
+        ),
+      },
+    ]);
+
+    const stats = index.indexStats();
+    expect(stats).toMatchObject({
+      logical: {
+        documents: { total: 5, strict: 3, degraded: 2 },
+        types: [
+          { type: "Guide", documentCount: 1 },
+          { type: "Note", documentCount: 3 },
+          { type: "note", documentCount: 1 },
+        ],
+        statuses: {
+          draft: 1,
+          stable: 2,
+          deprecated: 1,
+          unclassified: 1,
+        },
+        trustTiers: {
+          unverified: 1,
+          machineConfirmed: 1,
+          humanReviewed: 2,
+          unclassified: 1,
+        },
+      },
+      storage: {
+        kind: "in-memory-index-files",
+      },
+    });
+    expect(Object.keys(stats).sort()).toEqual(["logical", "storage"]);
+    expect(Object.keys(stats.logical).sort()).toEqual([
+      "documents",
+      "statuses",
+      "trustTiers",
+      "types",
+    ]);
+    expect(Object.keys(stats.storage).sort()).toEqual([
+      "kind",
+      "sizeInBytes",
+    ]);
+    expect(stats.storage.kind).toBe("in-memory-index-files");
+    if (stats.storage.kind === "in-memory-index-files") {
+      expect(Number.isSafeInteger(stats.storage.sizeInBytes)).toBe(true);
+      expect(stats.storage.sizeInBytes).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns detached recursively frozen index stats", () => {
+    const index = createOkfSearch([{
+      path: "stats.md",
+      markdown: concept("type: note", "stats needle"),
+    }]);
+
+    const first = index.indexStats();
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.logical)).toBe(true);
+    expect(Object.isFrozen(first.logical.documents)).toBe(true);
+    expect(Object.isFrozen(first.logical.types)).toBe(true);
+    expect(Object.isFrozen(first.logical.types[0])).toBe(true);
+    expect(Object.isFrozen(first.logical.statuses)).toBe(true);
+    expect(Object.isFrozen(first.logical.trustTiers)).toBe(true);
+    expect(Object.isFrozen(first.storage)).toBe(true);
+
+    const mutable = first as unknown as {
+      logical: {
+        documents: { total: number };
+        types: Array<{ documentCount: number }>;
+      };
+    };
+    expect(() => {
+      mutable.logical.documents.total = 99;
+    }).toThrow(TypeError);
+    expect(() => {
+      mutable.logical.types[0]!.documentCount = 99;
+    }).toThrow(TypeError);
+
+    const second = index.indexStats();
+    expect(second).not.toBe(first);
+    expect(second.logical).not.toBe(first.logical);
+    expect(second.logical.documents).not.toBe(first.logical.documents);
+    expect(second.logical.types).not.toBe(first.logical.types);
+    expect(second.logical.types[0]).not.toBe(first.logical.types[0]);
+    expect(second.storage).not.toBe(first.storage);
+    expect(second.logical.documents.total).toBe(1);
+  });
+
+  it("keeps stats across failed mutations and updates them after success", () => {
+    const index = createOkfSearch([{
+      path: "seed.md",
+      markdown: concept("type: note", "seed needle"),
+    }]);
+    const initial = index.indexStats();
+
+    expect(() => index.ingest({
+      path: "failed.md",
+      markdown: concept("status: stable", "failed needle"),
+    })).toThrowError(expect.objectContaining({
+      code: "ERR_OKF_FIELD",
+      field: "type",
+    }));
+    expect(index.indexStats().logical).toEqual(initial.logical);
+
+    index.ingest({
+      path: "added.md",
+      markdown: concept("type: guide\nstatus: deprecated", "added needle"),
+    });
+    expect(index.indexStats().logical.documents).toEqual({
+      total: 2,
+      strict: 2,
+      degraded: 0,
+    });
+    expect(index.indexStats().logical.types).toEqual([
+      { type: "guide", documentCount: 1 },
+      { type: "note", documentCount: 1 },
+    ]);
+
+    expect(index.remove("added.md")).toBe(true);
+    expect(index.indexStats().logical.documents).toEqual(initial.logical.documents);
+  });
+
   it("supports any/all, field selection, final-term prefix, and fuzzy matching", () => {
     const index = createOkfSearch([
       {

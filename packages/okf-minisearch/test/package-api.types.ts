@@ -16,6 +16,7 @@ import {
   validateOkfDocument,
 } from "../src/index.js";
 import { openOkf as openBrowserOkf } from "../src/browser.js";
+import type { OkfIndexStats as BrowserOkfIndexStats } from "../src/browser.js";
 import type {
   OkfAutoSuggestOptions,
   OkfConformance,
@@ -25,7 +26,10 @@ import type {
   OkfDocument,
   OkfDocumentInput,
   OkfErrorCode,
+  OkfIndexStats,
+  OkfIndexStorageStats,
   OkfIngestResult,
+  OkfLogicalIndexStats,
   OkfSearch,
   OkfSearchField,
   OkfSearchHit,
@@ -80,6 +84,63 @@ type ExactOkfIngestResult = Assert<Same<
 type ExactOkfDocumentStatus = Assert<Same<
   OkfDocument["status"],
   OkfStatus
+>>;
+type ExactOkfLogicalIndexStats = Assert<Same<
+  OkfLogicalIndexStats,
+  {
+    readonly documents: {
+      readonly total: number;
+      readonly strict: number;
+      readonly degraded: number;
+    };
+    readonly types: readonly {
+      readonly type: string;
+      readonly documentCount: number;
+    }[];
+    readonly statuses: {
+      readonly draft: number;
+      readonly stable: number;
+      readonly deprecated: number;
+      readonly unclassified: number;
+    };
+    readonly trustTiers: {
+      readonly unverified: number;
+      readonly machineConfirmed: number;
+      readonly humanReviewed: number;
+      readonly unclassified: number;
+    };
+  }
+>>;
+type ExactOkfIndexStorageStats = Assert<Same<
+  OkfIndexStorageStats,
+  | {
+      readonly kind: "in-memory-index-files";
+      readonly sizeInBytes: number;
+    }
+  | {
+      readonly kind: "serialized-index";
+      readonly format: "minisearch-json-utf8";
+      readonly sizeInBytes: number;
+    }
+>>;
+type ExactOkfIndexStorageSize = Assert<Same<
+  OkfIndexStats["storage"]["sizeInBytes"],
+  number
+>>;
+type ExactOkfIndexStats = Assert<Same<
+  OkfIndexStats,
+  {
+    readonly logical: OkfLogicalIndexStats;
+    readonly storage: OkfIndexStorageStats;
+  }
+>>;
+type ExactBrowserOkfIndexStats = Assert<Same<
+  BrowserOkfIndexStats,
+  OkfIndexStats
+>>;
+type ExactOkfIndexStatsMethod = Assert<Same<
+  OkfSearch["indexStats"],
+  () => OkfIndexStats
 >>;
 type ExactOkfListDegradedDocuments = Assert<Same<
   OkfSearch["listDegradedDocuments"],
@@ -219,6 +280,8 @@ const degradedDocument: OkfDegradedDocument = {
   path: "concept.md",
   diagnostics: [diagnostic],
 };
+declare const stats: OkfIndexStats;
+const sizeInBytes: number = stats.storage.sizeInBytes;
 
 declare const suggestion: OkfSuggestion;
 // @ts-expect-error Suggestions are readonly at the public boundary.
@@ -267,6 +330,7 @@ void [
   openBrowser,
   validation,
   diagnosticCode,
+  sizeInBytes,
   unusableCode,
   unusableDiagnostic,
   diagnostic,
@@ -281,6 +345,12 @@ void [
   null as unknown as ExactOkfDegradedDocument,
   null as unknown as ExactOkfIngestResult,
   null as unknown as ExactOkfDocumentStatus,
+  null as unknown as ExactOkfLogicalIndexStats,
+  null as unknown as ExactOkfIndexStorageStats,
+  null as unknown as ExactOkfIndexStorageSize,
+  null as unknown as ExactOkfIndexStats,
+  null as unknown as ExactBrowserOkfIndexStats,
+  null as unknown as ExactOkfIndexStatsMethod,
   null as unknown as ExactOkfSearchOptionKeys,
   null as unknown as ExactOkfSearchWhereKeys,
   null as unknown as ExactOkfSearchConformance,

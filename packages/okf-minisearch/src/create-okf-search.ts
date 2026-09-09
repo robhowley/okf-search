@@ -12,8 +12,12 @@ import type {
   OkfDegradedDocument,
   OkfDiagnostic,
   OkfDocumentInput,
+  OkfIndexStats,
   OkfIngestResult,
+  OkfLogicalIndexStats,
   OkfSearch,
+  OkfStatus,
+  OkfTrustTier,
 } from "./types.js";
 import type {
   NonEmptyDiagnostics,
@@ -28,14 +32,27 @@ type IndexedDocumentState =
       readonly type: string;
       readonly recordIds: NonEmptyRecordIds;
       readonly conformance: "strict";
+      readonly status: OkfStatus;
+      readonly trustTier: OkfTrustTier;
     }
   | {
       readonly path: string;
       readonly type: string;
       readonly recordIds: NonEmptyRecordIds;
       readonly conformance: "degraded";
+      readonly status?: OkfStatus;
+      readonly trustTier?: OkfTrustTier;
       readonly diagnostics: NonEmptyDiagnostics;
     };
+
+interface MutableLogicalIndexStats {
+  total: number;
+  strict: number;
+  degraded: number;
+  types: Map<string, number>;
+  statuses: Record<keyof OkfLogicalIndexStats["statuses"], number>;
+  trustTiers: Record<keyof OkfLogicalIndexStats["trustTiers"], number>;
+}
 
 interface NormalizedDocumentInput {
   readonly path: string;
@@ -75,8 +92,26 @@ export function createOkfSearch(
   ));
 
   const documentsById = new Map<string, IndexedDocumentState>();
-  const typeCounts = new Map<string, number>();
-  let typeSnapshot = createTypeSnapshot(typeCounts);
+  const logicalStats: MutableLogicalIndexStats = {
+    total: 0,
+    strict: 0,
+    degraded: 0,
+    types: new Map(),
+    statuses: {
+      draft: 0,
+      stable: 0,
+      deprecated: 0,
+      unclassified: 0,
+    },
+    trustTiers: {
+      unverified: 0,
+      machineConfirmed: 0,
+      humanReviewed: 0,
+      unclassified: 0,
+    },
+  };
+  let typeSnapshot = createTypeSnapshot(logicalStats.types);
+  let statsSnapshot: OkfIndexStats | undefined;
   let unusableError: OkfError | undefined;
 
   const assertUsable = (): void => {
@@ -100,17 +135,20 @@ export function createOkfSearch(
     const previous = documentsById.get(documentId);
     let typesChanged = false;
 
-    if (previous && (!next || previous.type !== next.type)) {
-      typesChanged = updateTypeCount(typeCounts, previous.type, -1);
+    if (previous) {
+      typesChanged = applyLogicalStats(logicalStats, previous, -1);
     }
-    if (next && (!previous || previous.type !== next.type)) {
-      typesChanged = updateTypeCount(typeCounts, next.type, 1) || typesChanged;
+    if (next) {
+      typesChanged = applyLogicalStats(logicalStats, next, 1) || typesChanged;
     }
 
     if (next) documentsById.set(documentId, next);
     else documentsById.delete(documentId);
 
-    if (typesChanged) typeSnapshot = createTypeSnapshot(typeCounts);
+    if (typesChanged) {
+      typeSnapshot = createTypeSnapshot(logicalStats.types);
+    }
+    statsSnapshot = undefined;
   };
 
   for (const result of prepared) {
@@ -183,6 +221,11 @@ export function createOkfSearch(
       return typeSnapshot;
     },
 
+    indexStats() {
+      assertUsable();
+      return statsSnapshot ??= createIndexStatsSnapshot(logicalStats, index);
+    },
+
     remove(path) {
       assertUsable();
       const identity = normalizeDocumentIdentity(path);
@@ -225,19 +268,25 @@ function indexedState(
   );
 
   if (prepared.conformance === "strict") {
+    const firstRecord = prepared.projection.records[0];
     return {
       path: projection.path,
       type: projection.type,
       recordIds,
       conformance: "strict",
+      status: firstRecord.status,
+      trustTier: firstRecord.trustTier,
     };
   }
 
+  const firstRecord = prepared.projection.records[0];
   return {
     path: projection.path,
     type: projection.type,
     recordIds,
     conformance: "degraded",
+    ...(firstRecord.status === undefined ? {} : { status: firstRecord.status }),
+    ...(firstRecord.trustTier === undefined ? {} : { trustTier: firstRecord.trustTier }),
     diagnostics: copyNonEmptyDiagnostics(prepared.diagnostics),
   };
 }
@@ -255,6 +304,39 @@ function copyNonEmptyDiagnostics(
     { ...diagnostics[0] },
     ...diagnostics.slice(1).map((item) => ({ ...item })),
   ];
+}
+
+function applyLogicalStats(
+  stats: MutableLogicalIndexStats,
+  state: IndexedDocumentState,
+  delta: 1 | -1,
+): boolean {
+  stats.total += delta;
+  stats[state.conformance] += delta;
+  const typesChanged = updateTypeCount(stats.types, state.type, delta);
+
+  const status = state.status ?? "unclassified";
+  stats.statuses[status] += delta;
+
+  const trustTier = trustTierBucket(state.trustTier);
+  stats.trustTiers[trustTier] += delta;
+
+  return typesChanged;
+}
+
+function trustTierBucket(
+  trustTier: OkfTrustTier | undefined,
+): keyof OkfLogicalIndexStats["trustTiers"] {
+  switch (trustTier) {
+    case "unverified":
+      return "unverified";
+    case "machine-confirmed":
+      return "machineConfirmed";
+    case "human-reviewed":
+      return "humanReviewed";
+    default:
+      return "unclassified";
+  }
 }
 
 function updateTypeCount(
@@ -275,6 +357,52 @@ function createTypeSnapshot(
   typeCounts: ReadonlyMap<string, number>,
 ): readonly string[] {
   return Object.freeze([...typeCounts.keys()].sort(comparePaths));
+}
+
+function createIndexStatsSnapshot(
+  stats: MutableLogicalIndexStats,
+  index: MiniSearch<OkfIndexRecord>,
+): OkfIndexStats {
+  const types = Object.freeze(
+    [...stats.types.entries()]
+      .sort(([left], [right]) => comparePaths(left, right))
+      .map(([type, documentCount]) =>
+        Object.freeze({ type, documentCount })),
+  );
+  const logical = Object.freeze({
+    documents: Object.freeze({
+      total: stats.total,
+      strict: stats.strict,
+      degraded: stats.degraded,
+    }),
+    types,
+    statuses: Object.freeze({
+      draft: stats.statuses.draft,
+      stable: stats.statuses.stable,
+      deprecated: stats.statuses.deprecated,
+      unclassified: stats.statuses.unclassified,
+    }),
+    trustTiers: Object.freeze({
+      unverified: stats.trustTiers.unverified,
+      machineConfirmed: stats.trustTiers.machineConfirmed,
+      humanReviewed: stats.trustTiers.humanReviewed,
+      unclassified: stats.trustTiers.unclassified,
+    }),
+  });
+
+  const serialized = JSON.stringify(index);
+  if (serialized === undefined) {
+    throw new Error("MiniSearch index serialization returned undefined");
+  }
+
+  return Object.freeze({
+    logical,
+    storage: Object.freeze({
+      kind: "serialized-index" as const,
+      format: "minisearch-json-utf8" as const,
+      sizeInBytes: new TextEncoder().encode(serialized).byteLength,
+    }),
+  });
 }
 
 function assertOwnedRecordIds(

@@ -61,7 +61,10 @@ const nativeRootTypeExports = [
   "OkfErrorCode",
   "OkfExecutor",
   "OkfGeneration",
+  "OkfIndexStats",
+  "OkfIndexStorageStats",
   "OkfIngestResult",
+  "OkfLogicalIndexStats",
   "OkfParameter",
   "OkfSearch",
   "OkfSearchField",
@@ -524,6 +527,7 @@ const types: readonly string[] = listTypes();
 const remove = null as unknown as OkfSearch["remove"];
 const removalResult: boolean = remove("consumer.md");
 const direct: OkfSearch = createOkfSearch([]);
+const sizeInBytes: number = direct.indexStats().storage.sizeInBytes;
 const opened: Promise<OkfSearch> = openOkf("./knowledge");
 // @ts-expect-error The Node declaration accepts only a filesystem root string.
 openOkf([]);
@@ -578,6 +582,7 @@ void [
   createOkfSearch,
   openOkf,
   direct,
+  sizeInBytes,
   opened,
   validator,
   validationResult,
@@ -788,7 +793,10 @@ import type {
   OkfErrorCode,
   OkfExecutor,
   OkfGeneration,
+  OkfIndexStats,
+  OkfIndexStorageStats,
   OkfIngestResult,
+  OkfLogicalIndexStats,
   OkfParameter,
   OkfSearch,
   OkfSearchField,
@@ -825,6 +833,10 @@ type ExactAutoSuggest = Assert<Same<
   OkfSearch["autoSuggest"],
   (query: string, options?: OkfSearchOptions) => never
 >>;
+type ExactIndexStats = Assert<Same<
+  OkfSearch["indexStats"],
+  () => OkfIndexStats
+>>;
 type ExactSearchField = Assert<Same<OkfSearchField,
   | "resource"
   | "title"
@@ -837,6 +849,7 @@ type ExactSearchField = Assert<Same<OkfSearchField,
 >>;
 
 const handle: OkfSearch = createOkfSearch([]);
+const sizeInBytes: number = handle.indexStats().storage.sizeInBytes;
 const opened: Promise<OkfSearch> = openOkf(".");
 const validation: OkfValidationResult = validateOkfDocument({
   path: "types.md",
@@ -845,12 +858,14 @@ const validation: OkfValidationResult = validateOkfDocument({
 const unsupported = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 void [
   handle,
+  sizeInBytes,
   opened,
   validation,
   unsupported,
   null as ExactErrorCode | null,
   null as ExactDiagnosticCode | null,
   null as ExactAutoSuggest | null,
+  null as ExactIndexStats | null,
   null as ExactSearchField | null,
   null as IsoDateTime | null,
   null as OkfAttester | null,
@@ -861,7 +876,9 @@ void [
   null as OkfDocumentInput | null,
   null as OkfExecutor | null,
   null as OkfGeneration | null,
+  null as OkfIndexStorageStats | null,
   null as OkfIngestResult | null,
+  null as OkfLogicalIndexStats | null,
   null as OkfParameter | null,
   null as OkfSearchHit | null,
   null as OkfSource | null,
