@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.3.4...okf-search-native-v0.4.0) (2026-09-09)
+
+
+### Features
+
+* add unified index stats API ([#76](https://github.com/robhowley/okf-search/issues/76)) ([36e7b9f](https://github.com/robhowley/okf-search/commit/36e7b9f203b3553f3c63829d383a19f2be7abef5))
+
 ## [0.3.4](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.3.3...okf-search-native-v0.3.4) (2026-09-05)
 
 
