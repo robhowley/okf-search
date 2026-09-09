@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-09T18:48:57.823Z",
+  "command": "pnpm --filter @okf-internal/prepare benchmark:memory --root \"/Users/roberthowley/Documents/wiki-w-type\" --cycles 3 --output \"test/evidence/phase-0-retention.json\"",
+  "protocol": {
+    "measuredCycles": 3,
+    "processReuse": "all read/prepare/drop cycles run in one process",
+    "filesystemWarmup": "full manifest fingerprint read before the initial snapshot",
+    "garbageCollection": "--expose-gc twice before the initial snapshot and after every drop",
+    "build": "TypeScript compiled JavaScript"
+  },
+  "corpus": {
+    "documents": 13692,
+    "bytes": 62463920,
+    "manifestFingerprint": "f57b9a3f8a54073b61f258b5bd29d65fd32576ee2a97e8618a1e7871b1ddab6e"
+  },
+  "host": {
+    "hostname": "Roberts-MacBook-Pro.local",
+    "platform": "darwin",
+    "release": "25.6.0",
+    "architecture": "arm64",
+    "node": "v24.15.0",
+    "cpuModel": "Apple M4 Pro",
+    "logicalCpuCount": 12,
+    "totalMemoryBytes": 51539607552,
+    "freeMemoryBytesAtReport": 671252480
+  },
+  "repository": {
+    "commit": "cbef6ead956a1a04f506482d67d333343eec49aa",
+    "dirty": true,
+    "changes": [
+      " M package.json",
+      " M packages/okf-prepare/package.json",
+      " M pnpm-lock.yaml",
+      "?? packages/okf-prepare/scripts/baseline.mjs",
+      "?? packages/okf-prepare/scripts/corpus-oracle.mjs",
+      "?? packages/okf-prepare/scripts/corpus-support.mjs",
+      "?? packages/okf-prepare/scripts/memory-retention.mjs",
+      "?? packages/okf-prepare/scripts/oracle-fixtures.mjs",
+      "?? packages/okf-prepare/scripts/oracle.mjs",
+      "?? packages/okf-prepare/scripts/provenance-support.mjs",
+      "?? packages/okf-prepare/scripts/typed-structural-encoder.mjs",
+      "?? packages/okf-prepare/test/evidence/corpus-oracle.json",
+      "?? packages/okf-prepare/test/evidence/phase-0-baseline.json",
+      "?? packages/okf-prepare/test/evidence/phase-0-retention.json",
+      "?? packages/okf-prepare/test/fixtures/filesystem/utf8-bom.md",
+      "?? packages/okf-prepare/test/fixtures/oracle-v1.json",
+      "?? packages/okf-prepare/test/fixtures/oracle-v1.typed",
+      "?? packages/okf-prepare/test/oracle.test.mjs"
+    ]
+  },
+  "artifactFingerprint": {
+    "sha256": "46f4022a8e9bbd58fb066054d53ad6299ba9373921a9151ced312f8713807e0a",
+    "runtimeFiles": [
+      {
+        "path": "packages/okf-prepare/dist/errors.js",
+        "bytes": 832,
+        "sha256": "f64ed5dd63abc02d3d46da795be804f3a9813e44481b9a8f5137cb4de08a50dd"
+      },
+      {
+        "path": "packages/okf-prepare/dist/identity.js",
+        "bytes": 1209,
+        "sha256": "b194a0fd423e8e0bdd2d6e55efeb668d608b4eebb94042beb61a94e3d9c18328"
+      },
+      {
+        "path": "packages/okf-prepare/dist/index.js",
+        "bytes": 389,
+        "sha256": "c5183cbe524dbce075bc2b13cd9494cbaa4b8b671a14075c0e84fe8fb98495f4"
+      },
+      {
+        "path": "packages/okf-prepare/dist/node.js",
+        "bytes": 2969,
+        "sha256": "41ae71c446525c75292b8a80a8c57b0bf5bc7349bf8d9c2be687c6bca432db6d"
+      },
+      {
+        "path": "packages/okf-prepare/dist/prepare.js",
+        "bytes": 28630,
+        "sha256": "81424e6cb34415283ae292bd77c61bee1a1f6d9e6128e8b8b74cfbb1470a8d99"
+      },
+      {
+        "path": "packages/okf-prepare/dist/types.js",
+        "bytes": 11,
+        "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+      },
+      {
+        "path": "packages/okf-prepare/dist/vocabulary.js",
+        "bytes": 541,
+        "sha256": "1e99c5a64fd03896a00fdbd2e87a4fff203cff3c5173b2ec332a9189ea9c2d96"
+      }
+    ],
+    "dependencyManifest": {
+      "path": "packages/okf-prepare/package.json",
+      "bytes": 1061,
+      "sha256": "2dd9405e23fc08a4fea8e37a9c3540f301210ce28a6b121c519f5b27ab6e765d",
+      "dependencies": {
+        "mdast-util-from-markdown": "2.0.3",
+        "yaml": "2.9.0"
+      }
+    },
+    "dependencyLock": {
+      "path": "pnpm-lock.yaml",
+      "bytes": 185577,
+      "sha256": "2b4a29ea289f5d0a001b36f28de6dee48a01dfa30dc0c6fc695e23a43be9cfe8"
+    }
+  },
+  "cycles": [
+    {
+      "cycle": 1,
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "afterRead": {
+        "rss": 320143360,
+        "heapTotal": 256540672,
+        "heapUsed": 138284576,
+        "external": 3540732,
+        "arrayBuffers": 1405277
+      },
+      "afterPrepare": {
+        "rss": 583843840,
+        "heapTotal": 487849984,
+        "heapUsed": 356780432,
+        "external": 2164362,
+        "arrayBuffers": 28907
+      },
+      "afterDrop": {
+        "rss": 580648960,
+        "heapTotal": 271220736,
+        "heapUsed": 131820968,
+        "external": 2162974,
+        "arrayBuffers": 28907
+      }
+    },
+    {
+      "cycle": 2,
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "afterRead": {
+        "rss": 581648384,
+        "heapTotal": 242909184,
+        "heapUsed": 146332688,
+        "external": 4688295,
+        "arrayBuffers": 2554228
+      },
+      "afterPrepare": {
+        "rss": 584957952,
+        "heapTotal": 470810624,
+        "heapUsed": 380785000,
+        "external": 2162974,
+        "arrayBuffers": 28907
+      },
+      "afterDrop": {
+        "rss": 582615040,
+        "heapTotal": 270958592,
+        "heapUsed": 131903520,
+        "external": 2162974,
+        "arrayBuffers": 28907
+      }
+    },
+    {
+      "cycle": 3,
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "afterRead": {
+        "rss": 582942720,
+        "heapTotal": 260472832,
+        "heapUsed": 156849032,
+        "external": 11001561,
+        "arrayBuffers": 8867494
+      },
+      "afterPrepare": {
+        "rss": 585695232,
+        "heapTotal": 456196096,
+        "heapUsed": 321945480,
+        "external": 2162974,
+        "arrayBuffers": 28907
+      },
+      "afterDrop": {
+        "rss": 583368704,
+        "heapTotal": 270434304,
+        "heapUsed": 131951080,
+        "external": 2162974,
+        "arrayBuffers": 28907
+      }
+    }
+  ],
+  "initial": {
+    "rss": 90456064,
+    "heapTotal": 25411584,
+    "heapUsed": 7194056,
+    "external": 2164322,
+    "arrayBuffers": 28907
+  },
+  "final": {
+    "rss": 583368704,
+    "heapTotal": 270434304,
+    "heapUsed": 131951080,
+    "external": 2162974,
+    "arrayBuffers": 28907
+  },
+  "retainedGrowthBytes": {
+    "rss": 492912640,
+    "heapTotal": 245022720,
+    "heapUsed": 124757024,
+    "external": -1348,
+    "arrayBuffers": 0
+  },
+  "maxRssBytes": 591298560
+}

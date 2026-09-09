@@ -18,11 +18,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:oracle": "pnpm build && node scripts/oracle.mjs --repeat 10",
+    "oracle:update": "pnpm build && node scripts/oracle.mjs --update --repeat 10",
+    "test:corpus": "pnpm build && node scripts/corpus-oracle.mjs",
+    "benchmark": "pnpm build && node scripts/baseline.mjs",
+    "benchmark:memory": "pnpm build && node --expose-gc scripts/memory-retention.mjs"
   },
   "dependencies": {
-    "mdast-util-from-markdown": "^2.0.3",
-    "yaml": "^2.9.0"
+    "mdast-util-from-markdown": "2.0.3",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",
