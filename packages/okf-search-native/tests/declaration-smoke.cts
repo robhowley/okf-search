@@ -31,6 +31,21 @@ type ExactIndexStats = Assert<Same<
   OkfSearch["indexStats"],
   () => OkfIndexStats
 >>;
+type ExactIndexStorageStats = Assert<Same<
+  OkfIndexStorageStats,
+  | {
+      readonly kind: "in-memory-index-files";
+      readonly indexFileBytes: number;
+    }
+  | {
+      readonly kind: "serialized-index";
+      readonly format: "minisearch-json-utf8";
+      readonly serializedIndexBytes: number;
+    }
+  | {
+      readonly kind: "unavailable";
+    }
+>>;
 
 const error = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 const rootHandle: OkfSearch = createOkfSearch([]);
@@ -53,6 +68,7 @@ void [
   native,
   null as ExactAutoSuggest | null,
   null as ExactIndexStats | null,
+  null as ExactIndexStorageStats | null,
   null as OkfIndexStorageStats | null,
   null as OkfLogicalIndexStats | null,
   null as ExactPreparedRemove | null,

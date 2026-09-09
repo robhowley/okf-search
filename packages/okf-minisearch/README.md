@@ -203,11 +203,15 @@ The returned array is a frozen, sorted snapshot. Values preserve case and includ
       unclassified: number;
     };
   };
-  storage: { kind: "unavailable" };
+  storage: {
+    kind: "serialized-index";
+    format: "minisearch-json-utf8";
+    serializedIndexBytes: number;
+  };
 }
 ```
 
-Logical values count documents, not sections, and change only after a successful `ingest` or `remove`. `types` preserves case and is sorted by type. Missing effective status or trust-tier metadata counts as `unclassified`.
+Logical values count documents, not sections, and change only after a successful `ingest` or `remove`. `types` preserves case and is sorted by type. Missing effective status or trust-tier metadata counts as `unclassified`. `serializedIndexBytes` is the UTF-8 byte length of `JSON.stringify` for the current MiniSearch index. It is calculated lazily on the first `indexStats()` call and after each successful mutation, rather than during indexing.
 
 ### Search fields
 

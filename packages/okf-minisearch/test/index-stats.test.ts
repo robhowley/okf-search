@@ -1,8 +1,13 @@
+import MiniSearch from "minisearch";
 import {
+  afterEach,
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
+
+import type { OkfIndexStats } from "../src/index.js";
 
 import {
   createOkfSearch,
@@ -11,39 +16,67 @@ import {
   concept,
 } from "./support/bundle.js";
 
-const EMPTY_STATS = {
-  logical: {
-    documents: {
-      total: 0,
-      strict: 0,
-      degraded: 0,
-    },
-    types: [],
-    statuses: {
-      draft: 0,
-      stable: 0,
-      deprecated: 0,
-      unclassified: 0,
-    },
-    trustTiers: {
-      unverified: 0,
-      machineConfirmed: 0,
-      humanReviewed: 0,
-      unclassified: 0,
-    },
+const EMPTY_LOGICAL_STATS = {
+  documents: {
+    total: 0,
+    strict: 0,
+    degraded: 0,
   },
-  storage: {
-    kind: "unavailable",
+  types: [],
+  statuses: {
+    draft: 0,
+    stable: 0,
+    deprecated: 0,
+    unclassified: 0,
+  },
+  trustTiers: {
+    unverified: 0,
+    machineConfirmed: 0,
+    humanReviewed: 0,
+    unclassified: 0,
   },
 } as const;
 
-describe("indexStats", () => {
-  it("returns the empty logical snapshot with unavailable MiniSearch storage", () => {
-    const okf = createOkfSearch([]);
+const SERIALIZED_STORAGE = {
+  kind: "serialized-index",
+  format: "minisearch-json-utf8",
+  serializedIndexBytes: expect.any(Number),
+};
 
-    expect(okf.indexStats()).toEqual(EMPTY_STATS);
-    expect(Object.keys(okf.indexStats())).toEqual(["logical", "storage"]);
-    expect(Object.keys(okf.indexStats().storage)).toEqual(["kind"]);
+const EMPTY_STATS = {
+  logical: EMPTY_LOGICAL_STATS,
+  storage: SERIALIZED_STORAGE,
+};
+
+function expectSerializedStorage(stats: OkfIndexStats): void {
+  expect(stats.storage).toEqual({
+    kind: "serialized-index",
+    format: "minisearch-json-utf8",
+    serializedIndexBytes: expect.any(Number),
+  });
+  if (stats.storage.kind === "serialized-index") {
+    expect(Number.isSafeInteger(stats.storage.serializedIndexBytes)).toBe(true);
+    expect(stats.storage.serializedIndexBytes).toBeGreaterThan(0);
+  }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("indexStats", () => {
+  it("returns the empty logical snapshot with serialized MiniSearch storage", () => {
+    const okf = createOkfSearch([]);
+    const stats = okf.indexStats();
+
+    expect(stats).toEqual(EMPTY_STATS);
+    expectSerializedStorage(stats);
+    expect(Object.keys(stats)).toEqual(["logical", "storage"]);
+    expect(Object.keys(stats.storage)).toEqual([
+      "kind",
+      "format",
+      "serializedIndexBytes",
+    ]);
   });
 
   it("counts each logical document once across all bucket families", () => {
@@ -86,7 +119,8 @@ describe("indexStats", () => {
       },
     ]);
 
-    expect(okf.indexStats()).toEqual({
+    const stats = okf.indexStats();
+    expect(stats).toEqual({
       logical: {
         documents: {
           total: 4,
@@ -111,10 +145,9 @@ describe("indexStats", () => {
           unclassified: 1,
         },
       },
-      storage: {
-        kind: "unavailable",
-      },
+      storage: SERIALIZED_STORAGE,
     });
+    expectSerializedStorage(stats);
   });
 
   it("returns recursively frozen snapshots that stay detached across mutations", () => {
@@ -125,6 +158,7 @@ describe("indexStats", () => {
       },
     ]);
     const prior = okf.indexStats();
+    expectSerializedStorage(prior);
 
     expect(okf.indexStats()).toBe(prior);
     for (const value of [
@@ -153,7 +187,11 @@ describe("indexStats", () => {
       (prior.logical.statuses as { stable: number }).stable = 99;
     }).toThrow(TypeError);
     expect(() => {
-      (prior.storage as { kind: string }).kind = "caller";
+      (prior.storage as {
+        kind: string;
+        format: string;
+        serializedIndexBytes: number;
+      }).format = "caller";
     }).toThrow(TypeError);
 
     okf.ingest({
@@ -185,7 +223,8 @@ describe("indexStats", () => {
         },
       },
     });
-    expect(okf.indexStats()).toEqual({
+    const current = okf.indexStats();
+    expect(current).toEqual({
       ...EMPTY_STATS,
       logical: {
         ...EMPTY_STATS.logical,
@@ -212,6 +251,60 @@ describe("indexStats", () => {
         },
       },
     });
+    expectSerializedStorage(current);
+  });
+
+  it("lazily caches bytes and invalidates them after successful mutations", () => {
+    const toJSON = vi.spyOn(MiniSearch.prototype, "toJSON");
+    const okf = createOkfSearch([{
+      path: "unicode.md",
+      markdown: concept("type: note\ntitle: café 🧭", "body"),
+    }]);
+
+    expect(toJSON).not.toHaveBeenCalled();
+    const initial = okf.indexStats();
+    expect(toJSON).toHaveBeenCalledTimes(1);
+    if (toJSON.mock.results[0]?.type !== "return") {
+      throw new Error("MiniSearch serialization did not return a value");
+    }
+    const serialized = JSON.stringify(toJSON.mock.results[0].value);
+    if (serialized === undefined) {
+      throw new Error("MiniSearch serialization returned undefined");
+    }
+    expect(initial.storage).toMatchObject({
+      kind: "serialized-index",
+      format: "minisearch-json-utf8",
+      serializedIndexBytes: new TextEncoder().encode(serialized).byteLength,
+    });
+    if (initial.storage.kind === "serialized-index") {
+      expect(initial.storage.serializedIndexBytes).toBeGreaterThan(
+        serialized.length,
+      );
+    }
+    expect(okf.indexStats()).toBe(initial);
+    expect(toJSON).toHaveBeenCalledTimes(1);
+
+    expect(() => okf.ingest({
+      path: "failed.md",
+      markdown: concept("type: [", "failed body"),
+    })).toThrow(expect.objectContaining({ code: "ERR_OKF_PARSE" }));
+    expect(okf.indexStats()).toBe(initial);
+    expect(toJSON).toHaveBeenCalledTimes(1);
+
+    okf.ingest({
+      path: "added.md",
+      markdown: concept("type: guide", "added body"),
+    });
+    expect(toJSON).toHaveBeenCalledTimes(1);
+    const added = okf.indexStats();
+    expect(added).not.toBe(initial);
+    expect(toJSON).toHaveBeenCalledTimes(2);
+
+    expect(okf.remove("added.md")).toBe(true);
+    expect(toJSON).toHaveBeenCalledTimes(2);
+    const removed = okf.indexStats();
+    expect(removed).not.toBe(added);
+    expect(toJSON).toHaveBeenCalledTimes(3);
   });
 
   it("updates only after successful replacement or removal", () => {
@@ -264,10 +357,13 @@ describe("indexStats", () => {
         },
       },
     });
+    expectSerializedStorage(replaced);
 
     expect(okf.remove("./state.md")).toBe(true);
-    expect(okf.indexStats()).toEqual(EMPTY_STATS);
+    const empty = okf.indexStats();
+    expect(empty).toEqual(EMPTY_STATS);
+    expectSerializedStorage(empty);
     expect(okf.remove("state.md")).toBe(false);
-    expect(okf.indexStats()).not.toBe(replaced);
+    expect(okf.indexStats()).toBe(empty);
   });
 });

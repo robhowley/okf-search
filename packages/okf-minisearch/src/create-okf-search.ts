@@ -111,7 +111,7 @@ export function createOkfSearch(
     },
   };
   let typeSnapshot = createTypeSnapshot(logicalStats.types);
-  let statsSnapshot = createIndexStatsSnapshot(logicalStats);
+  let statsSnapshot: OkfIndexStats | undefined;
   let unusableError: OkfError | undefined;
 
   const assertUsable = (): void => {
@@ -148,7 +148,7 @@ export function createOkfSearch(
     if (typesChanged) {
       typeSnapshot = createTypeSnapshot(logicalStats.types);
     }
-    statsSnapshot = createIndexStatsSnapshot(logicalStats);
+    statsSnapshot = undefined;
   };
 
   for (const result of prepared) {
@@ -223,7 +223,7 @@ export function createOkfSearch(
 
     indexStats() {
       assertUsable();
-      return statsSnapshot;
+      return statsSnapshot ??= createIndexStatsSnapshot(logicalStats, index);
     },
 
     remove(path) {
@@ -361,6 +361,7 @@ function createTypeSnapshot(
 
 function createIndexStatsSnapshot(
   stats: MutableLogicalIndexStats,
+  index: MiniSearch<OkfIndexRecord>,
 ): OkfIndexStats {
   const types = Object.freeze(
     [...stats.types.entries()]
@@ -389,9 +390,18 @@ function createIndexStatsSnapshot(
     }),
   });
 
+  const serialized = JSON.stringify(index);
+  if (serialized === undefined) {
+    throw new Error("MiniSearch index serialization returned undefined");
+  }
+
   return Object.freeze({
     logical,
-    storage: Object.freeze({ kind: "unavailable" as const }),
+    storage: Object.freeze({
+      kind: "serialized-index" as const,
+      format: "minisearch-json-utf8" as const,
+      serializedIndexBytes: new TextEncoder().encode(serialized).byteLength,
+    }),
   });
 }
 

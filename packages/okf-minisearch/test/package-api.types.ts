@@ -118,6 +118,11 @@ type ExactOkfIndexStorageStats = Assert<Same<
       readonly indexFileBytes: number;
     }
   | {
+      readonly kind: "serialized-index";
+      readonly format: "minisearch-json-utf8";
+      readonly serializedIndexBytes: number;
+    }
+  | {
       readonly kind: "unavailable";
     }
 >>;
