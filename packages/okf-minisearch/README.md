@@ -176,15 +176,26 @@ The returned array is a frozen, sorted snapshot. Values preserve case and includ
 
 ### Index statistics
 
-Use `indexStats()` for one frozen snapshot of the current logical index:
+`indexStats()` returns a detached, recursively frozen snapshot:
 
-```js
-const stats = okf.indexStats();
-console.log(stats.logical.documents.total);
-console.log(stats.logical.types);
+```text
+{
+  logical: {
+    documents: { total, strict, degraded },
+    types: [{ type, documentCount }],
+    statuses: { draft, stable, deprecated, unclassified },
+    trustTiers: {
+      unverified,
+      machineConfirmed,
+      humanReviewed,
+      unclassified,
+    },
+  },
+  storage: { kind: "unavailable" },
+}
 ```
 
-Logical counts include each document once across strict/degraded conformance, type, status, and effective trust-tier buckets. MiniSearch does not expose comparable index storage telemetry, so `stats.storage` is `{ kind: "unavailable" }`.
+Logical values count documents, not sections, and change only after a successful `ingest` or `remove`. `types` preserves case and is sorted by type. Missing effective status or trust-tier metadata counts as `unclassified`.
 
 ### Search fields
 

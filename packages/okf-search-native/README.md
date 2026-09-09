@@ -67,11 +67,32 @@ highest-ranked matching section and includes the document path, heading path,
 line range, matched fields, and snippet. The handle also provides `listTypes()`
 and `listDegradedDocuments()` for inspecting the current collection.
 
-`indexStats()` returns committed logical counts and native index-file telemetry.
-For this backend, `stats.storage.indexFileBytes` is the current sum of Tantivy
-`RamDirectory` file lengths; it is not total process memory and can change after
-merges or removals. The returned stats snapshot is detached and recursively
-frozen.
+### Index statistics
+
+`indexStats()` returns a detached, recursively frozen snapshot:
+
+```text
+{
+  logical: {
+    documents: { total, strict, degraded },
+    types: [{ type, documentCount }],
+    statuses: { draft, stable, deprecated, unclassified },
+    trustTiers: {
+      unverified,
+      machineConfirmed,
+      humanReviewed,
+      unclassified,
+    },
+  },
+  storage: { kind: "in-memory-index-files", indexFileBytes },
+}
+```
+
+Logical values count documents, not sections, and change only after a successful
+`ingest` or `remove`. `types` preserves case and is sorted by type. Missing
+effective status or trust-tier metadata counts as `unclassified`.
+`indexFileBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
+process memory and can change without a logical change.
 
 ### Validation
 
@@ -112,7 +133,8 @@ replaces every indexed section owned by one document, and `removeDocument`
 removes them together. `PreparedDocument` contains document-wide metadata once;
 each `PreparedSection` contains only its ID, heading path, text, and line
 bounds. The DTO declarations are exported from `okf-search-native/prepared`,
-not from the package root.
+not from the package root. Its `indexStats()` result has the shape above but is
+a mutable N-API DTO; the package-root adapter returns the frozen copy.
 
 ## Requirements and tested platforms
 
