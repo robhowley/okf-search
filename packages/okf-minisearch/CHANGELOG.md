@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/robhowley/okf-search/compare/okf-minisearch-v2.2.1...okf-minisearch-v2.3.0) (2026-09-09)
+
+
+### Features
+
+* add unified index stats API ([#76](https://github.com/robhowley/okf-search/issues/76)) ([36e7b9f](https://github.com/robhowley/okf-search/commit/36e7b9f203b3553f3c63829d383a19f2be7abef5))
+
 ## [2.2.1](https://github.com/robhowley/okf-search/compare/okf-minisearch-v2.2.0...okf-minisearch-v2.2.1) (2026-08-31)
 
 
