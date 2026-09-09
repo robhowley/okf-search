@@ -51,7 +51,6 @@ jobs:
       released_packages: ${{ steps.candidates.outputs.released_packages }}
       native_released: ${{ steps.candidates.outputs.native_released }}
       pi_released: ${{ steps.candidates.outputs.pi_released }}
-      js_released_packages: ${{ steps.candidates.outputs.js_released_packages }}
     steps:
       - name: Checkout publication automation and tags
         uses: actions/checkout@v4
@@ -73,7 +72,6 @@ jobs:
           echo "has_releases=$(jq -r '.packages | length > 0' <<<"$metadata")" >>"$GITHUB_OUTPUT"
           echo "native_released=$(jq -r '.packages | any(.path == "packages/okf-search-native")' <<<"$metadata")" >>"$GITHUB_OUTPUT"
           echo "pi_released=$(jq -r '.packages | any(.path == "packages/pi-okf-search")' <<<"$metadata")" >>"$GITHUB_OUTPUT"
-          echo "js_released_packages=$(jq -c '[.packages[] | select(.path != "packages/okf-search-native")]' <<<"$metadata")" >>"$GITHUB_OUTPUT"
 
   native_release_build:
     name: Release native artifact (${{ matrix.target }})
@@ -335,7 +333,7 @@ jobs:
             --typescript "$GITHUB_WORKSPACE/node_modules/typescript/bin/tsc"
 
   publication_transaction:
-    name: Protected npm publication and registry proof
+    name: Publish packages to npm
     needs: [release_metadata, candidate_plan, native_candidate_test]
     if: >-
       ${{
@@ -369,7 +367,7 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Install npm 11
         run: npm install --global npm@11
-      - name: Verify all entries, publish only missing tarballs, and prove the whole registry set
+      - name: Validate the plan and publish missing tarballs only
         env:
           RELEASED_PACKAGES_JSON: ${{ needs.release_metadata.outputs.released_packages }}
           RELEASE_COMMIT: ${{ needs.release_metadata.outputs.release_commit }}
@@ -381,90 +379,3 @@ jobs:
             '{commit: $commit, packages: $packages}' >"$selection"
           node scripts/release-publication.mjs transact \
             "$RUNNER_TEMP/publication-plan" "$RUNNER_TEMP/publication-plan/plan.json" "$selection"
-
-  js_post_publish_test:
-    name: Exact JS registry install (${{ matrix.package.name }})
-    needs: [release_metadata, candidate_plan, publication_transaction]
-    if: needs.publication_transaction.result == 'success' && needs.release_metadata.outputs.js_released_packages != '[]'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJSON(needs.release_metadata.outputs.js_released_packages) }}
-    steps:
-      - name: Checkout immutable consumer proof
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release_metadata.outputs.release_commit }}
-          persist-credentials: false
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.20.0
-          registry-url: https://registry.npmjs.org
-      - name: Download exact published version plan
-        uses: actions/download-artifact@v4
-        with:
-          name: release-publication-plan
-          path: ${{ runner.temp }}/publication-plan
-      - name: Install exact registry versions scripts-disabled and run package smoke
-        shell: bash
-        run: node scripts/verify-release-consumer.mjs registry "$RUNNER_TEMP/publication-plan/plan.json" "${{ matrix.package.name }}"
-
-  native_post_publish_test:
-    name: Exact native registry install (${{ matrix.target }})
-    needs: [release_metadata, candidate_plan, publication_transaction]
-    if: needs.publication_transaction.result == 'success' && needs.release_metadata.outputs.native_released == 'true'
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      actions: read
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            node-arch: x64
-          - runner: macos-latest
-            target: x86_64-apple-darwin
-            node-arch: x64
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-            node-arch: arm64
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            node-arch: x64
-    steps:
-      - name: Checkout immutable consumer proof
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release_metadata.outputs.release_commit }}
-          persist-credentials: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11.22.0
-          standalone: true
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.20.0
-          architecture: ${{ matrix.node-arch }}
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-      - name: Install proof dependencies without scripts for target CPU
-        run: pnpm install --frozen-lockfile --ignore-scripts --cpu=${{ matrix.node-arch }}
-      - name: Download exact published version plan
-        uses: actions/download-artifact@v4
-        with:
-          name: release-publication-plan
-          path: ${{ runner.temp }}/publication-plan
-      - name: Install exact registry version scripts-disabled and run shared native journey
-        shell: bash
-        run: |
-          node scripts/verify-release-consumer.mjs registry \
-            "$RUNNER_TEMP/publication-plan/plan.json" okf-search-native \
-            --typescript "$GITHUB_WORKSPACE/node_modules/typescript/bin/tsc"

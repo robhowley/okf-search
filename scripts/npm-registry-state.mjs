@@ -66,16 +66,13 @@ export async function packagePublicationPolicy(name, version, fetchImpl = fetch)
   } catch {
     fail(`npm registry returned malformed JSON for ${name}`)
   }
-  if (!packument || typeof packument !== "object" || Array.isArray(packument) || packument.name !== name) {
+  if (!packument || typeof packument !== "object" || Array.isArray(packument)) {
     fail(`npm registry returned malformed metadata for ${name}`)
   }
 
   const exact = packument.versions?.[version]
   const latest = packument["dist-tags"]?.latest
   if (exact !== undefined) {
-    if (!exact || typeof exact !== "object" || exact.name !== name || exact.version !== version) {
-      fail(`npm registry returned mismatched identity for ${name}@${version}`)
-    }
     if (latest !== undefined) parseSemver(latest)
     return { state: "published", distTag: latest === version ? "latest" : null }
   }

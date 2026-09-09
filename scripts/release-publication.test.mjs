@@ -12,14 +12,12 @@ import {
   COMPRESSED_LIMIT,
   NATIVE_ARTIFACTS,
   NATIVE_PACKAGE_FILES,
-  PROVENANCE_PREDICATE,
   UNPACKED_LIMIT,
   createPublicationPlan,
   inspectPublicationArtifact,
   productionAdapters,
   runPublicationTransaction,
   runTar,
-  verifyNpmPublication,
   verifyPublicationPlan,
 } from "./release-publication.mjs"
 import { resolveCommandShape } from "./command-shape.mjs"
@@ -28,7 +26,6 @@ import {
   verifyLocalJsConsumers,
   verifyLocalNativeConsumer,
   verifyNativeConsumer,
-  verifyRegistryPlanConsumer,
 } from "./verify-release-consumer.mjs"
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/release-publication.json", import.meta.url)))
@@ -320,20 +317,18 @@ test("release publication npm commands use the Windows ComSpec at their producti
   const commands = []
   const tarball = join(tmpdir(), "release package.tgz")
   await withWindowsProcess(async () => {
-    const adapters = productionAdapters({}, (command, args, options) => {
+    const adapters = productionAdapters((command, args, options) => {
       commands.push({ command, args: [...args], options })
       return { status: 0, stdout: null, stderr: null }
     })
     assert.equal(await adapters.npmVersion(), "")
-    await adapters.registry.ping()
     await adapters.publish(tarball, "latest")
   })
 
-  assert.equal(commands.length, 3)
+  assert.equal(commands.length, 2)
   assert.equal(commands.every(({ command }) => command === "C:\\Windows\\System32\\custom-cmd.exe"), true)
   assert.deepEqual(commands[0].args, ["/d", "/s", "/c", "npm.cmd", "--version"])
-  assert.deepEqual(commands[1].args, ["/d", "/s", "/c", "npm.cmd", "ping", `--registry=${NPM_REGISTRY}`])
-  assert.deepEqual(commands[2].args, ["/d", "/s", "/c", "npm.cmd", "publish", tarball, "--access", "public", "--provenance", "--tag", "latest"])
+  assert.deepEqual(commands[1].args, ["/d", "/s", "/c", "npm.cmd", "publish", tarball, "--access", "public", "--provenance", "--tag", "latest"])
 })
 
 test("check-package pnpm launches use the Windows ComSpec at their production boundary", async () => {
@@ -672,20 +667,6 @@ test("local JS consumer fails closed for wrong, missing, and mutated selected ta
   }
 })
 
-test("registry plan mode forwards exact selected versions without executing on import", async () => {
-  const calls = []
-  const plan = {
-    packages: [
-      { name: "okf-search-native", version: "0.3.3" },
-      { name: "pi-okf-search", version: "0.4.0" },
-    ],
-  }
-  await verifyRegistryPlanConsumer(plan, "pi-okf-search", {
-    verifyJsConsumer: async (...args) => { calls.push(args) },
-  })
-  assert.deepEqual(calls, [["pi-okf-search", "0.4.0", plan.packages[0]]])
-})
-
 test("native consumer uses the resolved Windows batch shape for install", async () => {
   const commands = []
   const dependency = join(tmpdir(), "release package.tgz")
@@ -742,34 +723,6 @@ test("local native mode selects the planned tarball and runs all package consume
   }
 })
 
-test("registry mode derives the exact native version from the selected plan", async () => {
-  const calls = []
-  const plan = { packages: [{ name: "okf-search-native", version: "0.1.0" }] }
-  await verifyRegistryPlanConsumer(plan, "okf-search-native", {
-    typescript: "/typescript/tsc",
-    verifyNative: async (...args) => { calls.push(args) },
-  })
-  assert.deepEqual(calls, [[
-    "okf-search-native@0.1.0",
-    { typescript: "/typescript/tsc" },
-  ]])
-  await assert.rejects(
-    verifyRegistryPlanConsumer(plan, "pi-okf-search"),
-    /not selected/,
-  )
-})
-
-function oidcToken(commit = releaseCommit) {
-  const payload = Buffer.from(JSON.stringify({
-    aud: "npm:registry.npmjs.org",
-    repository: "robhowley/okf-search",
-    ref: "refs/heads/main",
-    workflow_ref: "robhowley/okf-search/.github/workflows/release-please.yml@refs/heads/main",
-    sha: commit,
-  })).toString("base64url")
-  return `header.${payload}.signature`
-}
-
 async function transactionFixture(states = {}) {
   const specs = [packageSpec("okf-minisearch", "2.3.0"), packageSpec("pi-okf-search", "0.5.0")]
   return makePlan(specs, (directory) => {
@@ -777,17 +730,11 @@ async function transactionFixture(states = {}) {
   }, async (name) => ({ state: states[name] ?? "unpublished", distTag: states[name] === "published" ? "latest" : "latest" }))
 }
 
-function transactionAdapters(data, initialStates, { failVerify } = {}) {
+function transactionAdapters(_data, initialStates) {
   const states = { ...initialStates }
   const events = []
   const registry = {
-    ping: async () => { events.push("ping") },
     policy: async (name) => { events.push(`policy:${name}`); return { state: states[name], distTag: "latest" } },
-    owner: async (name) => { events.push(`owner:${name}`); return "owned" },
-    verify: async (entry) => {
-      events.push(`verify:${entry.name}`)
-      if (failVerify === entry.name) throw new Error(`bad proof ${entry.name}`)
-    },
   }
   const publish = async (tarball, tag, entry) => {
     events.push(`publish:${entry.name}:${tarball}:${tag}`)
@@ -802,7 +749,7 @@ test("whole-plan preflight finishes before direct tarball publication", async ()
   const data = await transactionFixture({ "okf-minisearch": "published", "pi-okf-search": "unpublished" })
   try {
     const adapters = transactionAdapters(data, { "okf-minisearch": "published", "pi-okf-search": "unpublished" })
-    await runPublicationTransaction({
+    const result = await runPublicationTransaction({
       directory: data.directory,
       plan: data.plan,
       expectedSelection: data.selection,
@@ -810,50 +757,21 @@ test("whole-plan preflight finishes before direct tarball publication", async ()
       registry: adapters.registry,
       publish: adapters.publish,
       npmVersion: async () => "11.5.1",
-      getOidc: async () => { adapters.events.push("oidc"); return oidcToken() },
-      sleep: async () => {},
     })
     const firstPublish = adapters.events.findIndex((event) => event.startsWith("publish:"))
-    const oidc = adapters.events.indexOf("oidc")
-    assert.ok(oidc >= 0 && oidc < firstPublish)
-    assert.deepEqual(adapters.events.slice(0, oidc).filter((event) => event.startsWith("policy:")), [
+    assert.deepEqual(adapters.events.slice(0, 2), [
       "policy:okf-minisearch",
       "policy:pi-okf-search",
     ])
-    assert.deepEqual(adapters.events.slice(0, oidc).filter((event) => event.startsWith("owner:")), [
-      "owner:okf-minisearch",
-      "owner:pi-okf-search",
-    ])
-    assert.deepEqual(adapters.events.slice(0, oidc).filter((event) => event.startsWith("verify:")), ["verify:okf-minisearch"])
     assert.match(adapters.events[firstPublish], new RegExp(`${data.plan.packages[1].tarball.replaceAll(".", "\\.")}:latest$`))
-    assert.equal(adapters.events.some((event) => /pack|build/.test(event)), false)
-    assert.ok(adapters.events.slice(firstPublish + 1).filter((event) => event.startsWith("verify:")).length >= 3)
+    assert.deepEqual(result, data.plan.packages.map(({ name, version }) => ({ name, version })))
+    assert.equal(adapters.events.some((event) => /pack|build|verify|proof|ping|owner|oidc/.test(event)), false)
   } finally {
     rmSync(data.directory, { recursive: true, force: true })
   }
 })
 
-test("bad recovery proof blocks every npm mutation", async () => {
-  const data = await transactionFixture({ "okf-minisearch": "published", "pi-okf-search": "unpublished" })
-  try {
-    const adapters = transactionAdapters(data, { "okf-minisearch": "published", "pi-okf-search": "unpublished" }, { failVerify: "okf-minisearch" })
-    await assert.rejects(runPublicationTransaction({
-      directory: data.directory,
-      plan: data.plan,
-      expectedSelection: data.selection,
-      environment: transactionEnvironment,
-      registry: adapters.registry,
-      publish: adapters.publish,
-      npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-    }), /bad proof/)
-    assert.equal(adapters.events.some((event) => event.startsWith("publish:")), false)
-  } finally {
-    rmSync(data.directory, { recursive: true, force: true })
-  }
-})
-
-test("preflight, OIDC, and artifact failures stay before the first publish call", async (t) => {
+test("preflight and artifact failures stay before the first publish call", async (t) => {
   for (const [label, configure, pattern] of [
     ["last policy", (options) => {
       options.registry.policy = async (name) => {
@@ -861,7 +779,6 @@ test("preflight, OIDC, and artifact failures stay before the first publish call"
         return { state: "unpublished", distTag: "latest" }
       }
     }, /last policy failed/],
-    ["OIDC identity", (options) => { options.getOidc = async () => oidcToken("b".repeat(40)) }, /OIDC provenance commit mismatch/],
     ["changed artifact", (options, data) => { writeFileSync(join(data.directory, data.plan.packages[1].tarball), "changed") }, /artifact|tar/],
   ]) {
     await t.test(label, async () => {
@@ -877,7 +794,6 @@ test("preflight, OIDC, and artifact failures stay before the first publish call"
           registry: adapters.registry,
           publish: async (_path, _tag, entry) => { published.push(entry.name) },
           npmVersion: async () => "11.5.1",
-          getOidc: async () => oidcToken(),
         }
         configure(options, data)
         await assert.rejects(runPublicationTransaction(options), pattern)
@@ -889,79 +805,39 @@ test("preflight, OIDC, and artifact failures stay before the first publish call"
   }
 })
 
-test("publish and post-publish proof failures stop and remain explicit", async (t) => {
-  await t.test("publish failure stops dependency-order mutation", async () => {
-    const data = await transactionFixture()
-    try {
-      const attempted = []
-      const adapters = transactionAdapters(data, { "okf-minisearch": "unpublished", "pi-okf-search": "unpublished" })
-      await assert.rejects(runPublicationTransaction({
-        directory: data.directory,
-        plan: data.plan,
-        expectedSelection: data.selection,
-        environment: transactionEnvironment,
-        registry: adapters.registry,
-        publish: async (_path, _tag, entry) => { attempted.push(entry.name); throw new Error("npm publish failed") },
-        npmVersion: async () => "11.5.1",
-        getOidc: async () => oidcToken(),
-      }), /npm publish failed/)
-      assert.deepEqual(attempted, ["okf-minisearch"])
-    } finally {
-      rmSync(data.directory, { recursive: true, force: true })
-    }
-  })
-
-  await t.test("final whole-plan proof failure does not report success", async () => {
-    const data = await transactionFixture()
-    try {
-      const states = { "okf-minisearch": "unpublished", "pi-okf-search": "unpublished" }
-      const counts = new Map()
-      const registry = {
-        ping: async () => {},
-        owner: async () => "owned",
-        policy: async (name) => ({ state: states[name], distTag: "latest" }),
-        verify: async (entry) => {
-          const count = (counts.get(entry.name) ?? 0) + 1
-          counts.set(entry.name, count)
-          if (entry.name === "okf-minisearch" && count === 2) throw new Error("final proof failed")
-        },
-      }
-      await assert.rejects(runPublicationTransaction({
-        directory: data.directory,
-        plan: data.plan,
-        expectedSelection: data.selection,
-        environment: transactionEnvironment,
-        registry,
-        publish: async (_path, _tag, entry) => { states[entry.name] = "published" },
-        npmVersion: async () => "11.5.1",
-        getOidc: async () => oidcToken(),
-        sleep: async () => {},
-      }), /final proof failed/)
-      assert.equal(states["okf-minisearch"], "published")
-      assert.equal(states["pi-okf-search"], "published")
-    } finally {
-      rmSync(data.directory, { recursive: true, force: true })
-    }
-  })
+test("publish failure stops dependency-order mutation", async () => {
+  const data = await transactionFixture()
+  try {
+    const attempted = []
+    const adapters = transactionAdapters(data, { "okf-minisearch": "unpublished", "pi-okf-search": "unpublished" })
+    await assert.rejects(runPublicationTransaction({
+      directory: data.directory,
+      plan: data.plan,
+      expectedSelection: data.selection,
+      environment: transactionEnvironment,
+      registry: adapters.registry,
+      publish: async (_path, _tag, entry) => { attempted.push(entry.name); throw new Error("npm publish failed") },
+      npmVersion: async () => "11.5.1",
+    }), /npm publish failed/)
+    assert.deepEqual(attempted, ["okf-minisearch"])
+  } finally {
+    rmSync(data.directory, { recursive: true, force: true })
+  }
 })
 
-test("a version appearing after preflight is proved and skipped", async () => {
+test("a version appearing after preflight is skipped", async () => {
   const data = await transactionFixture()
   try {
     const calls = new Map()
     const published = []
-    const verified = []
     const registry = {
-      ping: async () => {},
-      owner: async () => "owned",
       policy: async (name) => {
         const count = (calls.get(name) ?? 0) + 1
         calls.set(name, count)
         return { state: name === "okf-minisearch" && count > 1 ? "published" : "unpublished", distTag: "latest" }
       },
-      verify: async (entry) => { verified.push(entry.name) },
     }
-    await runPublicationTransaction({
+    const result = await runPublicationTransaction({
       directory: data.directory,
       plan: data.plan,
       expectedSelection: data.selection,
@@ -969,41 +845,34 @@ test("a version appearing after preflight is proved and skipped", async () => {
       registry,
       publish: async (_path, _tag, entry) => { published.push(entry.name) },
       npmVersion: async () => "11.22.0",
-      getOidc: async () => oidcToken(),
-      sleep: async () => {},
     })
     assert.deepEqual(published, ["pi-okf-search"])
-    assert.equal(verified.filter((name) => name === "okf-minisearch").length, 2)
+    assert.deepEqual(result, data.plan.packages.map(({ name, version }) => ({ name, version })))
   } finally {
     rmSync(data.directory, { recursive: true, force: true })
   }
 })
 
-test("an already-published historical entry is proved with no tag and never mutated", async () => {
+test("an already-published historical entry is skipped with no tag and never mutated", async () => {
   const mini = packageSpec("okf-minisearch", "2.3.0")
   const data = await makePlan([mini], (directory) => {
     packTarball(directory, mini.name, mini.version, { name: mini.name, version: mini.version })
   }, async () => ({ state: "published", distTag: null }))
   try {
-    const verified = []
-    let oidc = false
-    await runPublicationTransaction({
+    let policyCalls = 0
+    const result = await runPublicationTransaction({
       directory: data.directory,
       plan: data.plan,
       expectedSelection: data.selection,
       environment: transactionEnvironment,
       registry: {
-        ping: async () => {},
-        policy: async () => ({ state: "published", distTag: null }),
-        owner: async () => "owned",
-        verify: async (entry) => { verified.push([entry.name, entry.distTag]) },
+        policy: async () => { policyCalls += 1; return { state: "published", distTag: null } },
       },
       publish: async () => assert.fail("historical entry was published"),
       npmVersion: async () => "11.5.1",
-      getOidc: async () => { oidc = true; return oidcToken() },
     })
-    assert.deepEqual(verified, [["okf-minisearch", null], ["okf-minisearch", null]])
-    assert.equal(oidc, false)
+    assert.deepEqual(result, [{ name: mini.name, version: mini.version }])
+    assert.equal(policyCalls, 1)
   } finally {
     rmSync(data.directory, { recursive: true, force: true })
   }
@@ -1017,7 +886,6 @@ test("transaction rejects an unpublished historical release before publication",
   try {
     const published = []
     const registry = {
-      ping: async () => {},
       policy: async (name, version) => packagePublicationPolicy(name, version, async (url) => {
         assert.equal(url, `${NPM_REGISTRY}/${name}`)
         return {
@@ -1025,8 +893,6 @@ test("transaction rejects an unpublished historical release before publication",
           json: async () => ({ name, "dist-tags": { latest: "2.4.0" }, versions: {} }),
         }
       }),
-      owner: async () => "owned",
-      verify: async () => assert.fail("historical entry was not published and should not be proved"),
     }
     await assert.rejects(runPublicationTransaction({
       directory: data.directory,
@@ -1036,7 +902,6 @@ test("transaction rejects an unpublished historical release before publication",
       registry,
       publish: async (_path, _tag, entry) => { published.push(entry.name) },
       npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
     }), /latest is newer/)
     assert.deepEqual(published, [])
   } finally {
@@ -1050,9 +915,6 @@ test("a newer latest appearing after preflight stops before the later mutation",
     const policyCalls = new Map()
     const published = []
     const registry = {
-      ping: async () => {},
-      owner: async () => "owned",
-      verify: async () => {},
       policy: async (name) => {
         const count = (policyCalls.get(name) ?? 0) + 1
         policyCalls.set(name, count)
@@ -1068,8 +930,6 @@ test("a newer latest appearing after preflight stops before the later mutation",
       registry,
       publish: async (_path, _tag, entry) => { published.push(entry.name) },
       npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-      sleep: async () => {},
     }), /latest is newer/)
     assert.deepEqual(published, ["okf-minisearch"])
   } finally {
@@ -1077,70 +937,7 @@ test("a newer latest appearing after preflight stops before the later mutation",
   }
 })
 
-test("post-publish proof retries are bounded and exhaustion blocks the next mutation", async () => {
-  const data = await transactionFixture()
-  try {
-    const adapters = transactionAdapters(data, { "okf-minisearch": "unpublished", "pi-okf-search": "unpublished" }, { failVerify: "okf-minisearch" })
-    const sleeps = []
-    await assert.rejects(runPublicationTransaction({
-      directory: data.directory,
-      plan: data.plan,
-      expectedSelection: data.selection,
-      environment: transactionEnvironment,
-      registry: adapters.registry,
-      publish: adapters.publish,
-      npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-      sleep: async (milliseconds) => { sleeps.push(milliseconds) },
-      proofAttempts: 3,
-    }), /bad proof/)
-    assert.deepEqual(adapters.events.filter((event) => event.startsWith("publish:")).map((event) => event.split(":")[1]), ["okf-minisearch"])
-    assert.equal(adapters.events.filter((event) => event === "verify:okf-minisearch").length, 3)
-    assert.deepEqual(sleeps, [10_000, 20_000])
-  } finally {
-    rmSync(data.directory, { recursive: true, force: true })
-  }
-})
-
-test("post-publish proof can recover within the bound before dependency-order publication continues", async () => {
-  const data = await transactionFixture()
-  try {
-    const states = { "okf-minisearch": "unpublished", "pi-okf-search": "unpublished" }
-    const attempts = new Map()
-    const published = []
-    const sleeps = []
-    const registry = {
-      ping: async () => {},
-      owner: async () => "owned",
-      policy: async (name) => ({ state: states[name], distTag: "latest" }),
-      verify: async (entry) => {
-        const count = (attempts.get(entry.name) ?? 0) + 1
-        attempts.set(entry.name, count)
-        if (entry.name === "okf-minisearch" && count < 3) throw new Error("registry propagation")
-      },
-    }
-    await runPublicationTransaction({
-      directory: data.directory,
-      plan: data.plan,
-      expectedSelection: data.selection,
-      environment: transactionEnvironment,
-      registry,
-      publish: async (_path, _tag, entry) => { published.push(entry.name); states[entry.name] = "published" },
-      npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-      sleep: async (milliseconds) => { sleeps.push(milliseconds) },
-      proofAttempts: 3,
-    })
-    assert.deepEqual(published, ["okf-minisearch", "pi-okf-search"])
-    assert.deepEqual(sleeps, [10_000, 20_000])
-    assert.equal(attempts.get("okf-minisearch"), 4, "newly published and final whole-plan proofs both ran")
-    assert.equal(attempts.get("pi-okf-search"), 2)
-  } finally {
-    rmSync(data.directory, { recursive: true, force: true })
-  }
-})
-
-test("transaction skips recovery entries, publishes all missing entries in dependency order, and finally proves every entry", async () => {
+test("transaction skips exact versions and publishes missing entries in dependency order", async () => {
   const specs = [
     packageSpec("okf-minisearch", "2.3.0"),
     packageSpec("okf-search-native", "0.1.0"),
@@ -1153,49 +950,33 @@ test("transaction skips recovery entries, publishes all missing entries in depen
   }, async (name) => ({ state: name === "okf-minisearch" ? "published" : "unpublished", distTag: "latest" }))
   try {
     const states = { "okf-minisearch": "published", "pi-okf-search": "unpublished", "okf-search-native": "unpublished" }
-    const events = []
-    const verified = []
     const published = []
-    await runPublicationTransaction({
+    const registry = {
+      policy: async (name) => ({ state: states[name], distTag: "latest" }),
+    }
+    const result = await runPublicationTransaction({
       directory: data.directory,
       plan: data.plan,
       expectedSelection: data.selection,
       environment: transactionEnvironment,
-      registry: {
-        ping: async () => {},
-        owner: async () => "owned",
-        policy: async (name) => ({ state: states[name], distTag: "latest" }),
-        verify: async (entry) => { verified.push(entry.name); events.push(`verify:${entry.name}`) },
-      },
+      registry,
       publish: async (tarball, tag, entry) => {
         published.push({ name: entry.name, tarball, tag })
-        events.push(`publish:${entry.name}`)
         states[entry.name] = "published"
       },
       npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-      sleep: async () => {},
     })
     assert.deepEqual(published, [
       { name: "okf-search-native", tarball: join(data.directory, data.plan.packages[1].tarball), tag: "latest" },
       { name: "pi-okf-search", tarball: join(data.directory, data.plan.packages[2].tarball), tag: "latest" },
     ])
-    const publishIndexes = published.map(({ name }) => events.indexOf(`publish:${name}`))
-    for (let index = 0; index < publishIndexes.length; index += 1) {
-      const end = publishIndexes[index + 1] ?? events.length
-      assert.ok(events.slice(publishIndexes[index] + 1, end).includes(`verify:${published[index].name}`))
-    }
-    const lastPublish = publishIndexes.at(-1)
-    for (const { name } of specs) {
-      assert.equal(verified.filter((verifiedName) => verifiedName === name).length, 2, `${name} was not proved before/after its skip or publish`)
-      assert.ok(events.lastIndexOf(`verify:${name}`) > lastPublish, `${name} lacks final post-state proof`)
-    }
+    assert.deepEqual(result, specs.map(({ name, version }) => ({ name, version })))
   } finally {
     rmSync(data.directory, { recursive: true, force: true })
   }
 })
 
-test("rerunning after a partial publish proves the prefix before publishing the remainder", async () => {
+test("rerunning after a partial publish skips the existing exact version", async () => {
   const data = await transactionFixture()
   try {
     const adapters = transactionAdapters(data, { "okf-minisearch": "unpublished", "pi-okf-search": "unpublished" })
@@ -1212,8 +993,6 @@ test("rerunning after a partial publish proves the prefix before publishing the 
         adapters.states[entry.name] = "published"
       },
       npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-      sleep: async () => {},
     }), /second publication interrupted/)
     assert.deepEqual(firstAttempt, ["okf-minisearch", "pi-okf-search"])
     assert.equal(adapters.states["okf-minisearch"], "published")
@@ -1221,7 +1000,7 @@ test("rerunning after a partial publish proves the prefix before publishing the 
 
     const retryStart = adapters.events.length
     const retryPublished = []
-    await runPublicationTransaction({
+    const result = await runPublicationTransaction({
       directory: data.directory,
       plan: data.plan,
       expectedSelection: data.selection,
@@ -1232,110 +1011,17 @@ test("rerunning after a partial publish proves the prefix before publishing the 
         await adapters.publish(tarball, tag, entry)
       },
       npmVersion: async () => "11.5.1",
-      getOidc: async () => oidcToken(),
-      sleep: async () => {},
     })
     assert.deepEqual(retryPublished, [{
       name: "pi-okf-search",
       tarball: join(data.directory, data.plan.packages[1].tarball),
       tag: "latest",
     }])
+    assert.deepEqual(result, data.plan.packages.map(({ name, version }) => ({ name, version })))
     const retryEvents = adapters.events.slice(retryStart)
-    const prefixProof = retryEvents.indexOf("verify:okf-minisearch")
-    const remainderPublish = retryEvents.findIndex((event) => event.startsWith("publish:pi-okf-search:"))
-    assert.ok(prefixProof >= 0 && prefixProof < remainderPublish)
+    assert.equal(retryEvents.filter((event) => event === "publish:okf-minisearch").length, 0)
   } finally {
     rmSync(data.directory, { recursive: true, force: true })
-  }
-})
-
-function publicationFixture() {
-  const directory = mkdtempSync(join(tmpdir(), "registry-proof-"))
-  const spec = packageSpec("okf-minisearch", "2.3.0")
-  const tarball = packTarball(directory, spec.name, spec.version, { name: spec.name, version: spec.version })
-  const bytes = readFileSync(tarball)
-  const registry = { bytes }
-  const entry = {
-    path: spec.path,
-    name: spec.name,
-    version: spec.version,
-    releaseTag: `${spec.name}-v${spec.version}`,
-    tarball: `${spec.name}-${spec.version}.tgz`,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
-    integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
-    compressedBytes: bytes.length,
-    unpackedBytes: JSON.stringify({ name: spec.name, version: spec.version }).length + "export const marker = 'selected-bytes'\n".length,
-    distTag: "latest",
-  }
-  const tarballUrl = `${NPM_REGISTRY}/${entry.name}/-/${entry.tarball}`
-  const attestationUrl = `${NPM_REGISTRY}/-/npm/v1/attestations/${entry.name}@${entry.version}`
-  const statement = {
-    _type: "https://in-toto.io/Statement/v1",
-    subject: [{ name: `pkg:npm/${entry.name}@${entry.version}`, digest: { sha512: Buffer.from(entry.integrity.slice(7), "base64").toString("hex") } }],
-    predicateType: PROVENANCE_PREDICATE,
-    predicate: {
-      buildDefinition: {
-        buildType: "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
-        externalParameters: { workflow: { ref: "refs/heads/main", repository: "https://github.com/robhowley/okf-search", path: ".github/workflows/release-please.yml" } },
-        resolvedDependencies: [{ uri: "git+https://github.com/robhowley/okf-search@refs/heads/main", digest: { gitCommit: releaseCommit } }],
-      },
-      runDetails: { builder: { id: "https://github.com/actions/runner/github-hosted" }, metadata: { invocationId: "https://github.com/robhowley/okf-search/actions/runs/1/attempts/1" } },
-    },
-  }
-  const provenance = {
-    predicateType: PROVENANCE_PREDICATE,
-    bundle: {
-      mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json",
-      verificationMaterial: { certificate: { rawBytes: "Y2VydA==" }, tlogEntries: [{}] },
-      dsseEnvelope: { payloadType: "application/vnd.in-toto+json", payload: Buffer.from(JSON.stringify(statement)).toString("base64"), signatures: [{}] },
-    },
-  }
-  const packument = {
-    name: entry.name,
-    maintainers: [{ name: "robhowley" }],
-    "dist-tags": { latest: entry.version },
-    versions: { [entry.version]: { name: entry.name, version: entry.version, dist: { integrity: entry.integrity, tarball: tarballUrl, attestations: { url: attestationUrl, provenance: { predicateType: PROVENANCE_PREDICATE } } } } },
-  }
-  const fetchImpl = async (url) => {
-    if (url === `${NPM_REGISTRY}/${entry.name}`) return { status: 200, json: async () => packument }
-    if (url === tarballUrl) return { status: 200, arrayBuffer: async () => registry.bytes }
-    if (url === attestationUrl) return { status: 200, json: async () => ({ attestations: [provenance] }) }
-    throw new Error(`unexpected ${url}`)
-  }
-  return { directory, entry, statement, provenance, packument, registry, fetchImpl }
-}
-
-test("registry proof checks owner, tag, bytes, SRI, provenance workflow, and release commit", async (t) => {
-  const passing = publicationFixture()
-  try {
-    assert.deepEqual(await verifyNpmPublication(passing.entry, { releaseCommit, fetchImpl: passing.fetchImpl }), { name: passing.entry.name, version: passing.entry.version, sha256: passing.entry.sha256 })
-  } finally {
-    rmSync(passing.directory, { recursive: true, force: true })
-  }
-
-  for (const [label, mutate, pattern] of [
-    ["owner", (data) => { data.packument.maintainers = [{ name: "other" }] }, /owner/],
-    ["tag", (data) => { data.packument["dist-tags"].latest = "2.2.1" }, /dist-tag/],
-    ["bytes", (data) => { data.registry.bytes = Buffer.from("different registry bytes") }, /SHA-256/],
-    ["SRI", (data) => { data.packument.versions["2.3.0"].dist.integrity = `sha512-${"A".repeat(86)}==` }, /integrity/],
-    ["workflow", (data) => {
-      data.statement.predicate.buildDefinition.externalParameters.workflow.path = ".github/workflows/other.yml"
-      data.provenance.bundle.dsseEnvelope.payload = Buffer.from(JSON.stringify(data.statement)).toString("base64")
-    }, /workflow identity/],
-    ["commit", (data) => {
-      data.statement.predicate.buildDefinition.resolvedDependencies = []
-      data.provenance.bundle.dsseEnvelope.payload = Buffer.from(JSON.stringify(data.statement)).toString("base64")
-    }, /release commit/],
-  ]) {
-    await t.test(label, async () => {
-      const data = publicationFixture()
-      try {
-        mutate(data)
-        await assert.rejects(verifyNpmPublication(data.entry, { releaseCommit, fetchImpl: data.fetchImpl }), pattern)
-      } finally {
-        rmSync(data.directory, { recursive: true, force: true })
-      }
-    })
   }
 })
 
@@ -1344,12 +1030,11 @@ test("release workflow keeps the transaction DAG, target CPU bindings, and candi
   const parsed = JSON.parse(execFileSync("ruby", ["-r", "yaml", "-r", "json", "-e", "print JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: true))", path.pathname], { encoding: "utf8" }))
   assert.deepEqual(Object.keys(parsed.jobs), [
     "release_please", "release_metadata", "native_release_build", "candidate_plan",
-    "native_candidate_test", "publication_transaction", "js_post_publish_test", "native_post_publish_test",
+    "native_candidate_test", "publication_transaction",
   ])
   const needs = (name) => [parsed.jobs[name].needs].flat().filter(Boolean)
   assert.deepEqual(needs("candidate_plan"), ["release_metadata", "native_release_build"])
   assert.deepEqual(needs("publication_transaction"), ["release_metadata", "candidate_plan", "native_candidate_test"])
-  assert.deepEqual(needs("js_post_publish_test"), ["release_metadata", "candidate_plan", "publication_transaction"])
   assert.equal(Object.values(parsed.jobs).filter((job) => job.environment === "npm-production").length, 1)
   assert.equal(
     parsed.jobs.release_metadata.outputs.pi_released,
@@ -1381,19 +1066,17 @@ test("release workflow keeps the transaction DAG, target CPU bindings, and candi
   )
   assert.match(parsed.jobs.publication_transaction.if, /always\(\)/)
   assert.match(parsed.jobs.publication_transaction.if, /needs\.native_candidate_test\.result == 'success'/)
+  assert.equal(parsed.jobs.publication_transaction.name, "Publish packages to npm")
   const releaseSteps = parsed.jobs.native_release_build.steps
   assert.equal(releaseSteps.find(({ name }) => name === "Install dependencies for target CPU").run, "pnpm install --frozen-lockfile --cpu=${{ matrix.node-arch }}")
   assert.equal(parsed.jobs.native_release_build.strategy.matrix.include.length, 4)
   assert.equal(parsed.jobs.native_candidate_test.strategy.matrix.include.length, 4)
-  assert.equal(parsed.jobs.native_post_publish_test.strategy.matrix.include.length, 4)
-  for (const job of ["native_candidate_test", "native_post_publish_test"]) {
-    assert.equal(
-      parsed.jobs[job].steps.find(({ name }) =>
-        name === "Install proof dependencies without scripts for target CPU"
-      ).run,
-      "pnpm install --frozen-lockfile --ignore-scripts --cpu=${{ matrix.node-arch }}",
-    )
-  }
+  assert.equal(
+    parsed.jobs.native_candidate_test.steps.find(({ name }) =>
+      name === "Install proof dependencies without scripts for target CPU"
+    ).run,
+    "pnpm install --frozen-lockfile --ignore-scripts --cpu=${{ matrix.node-arch }}",
+  )
   const transactionCommands = parsed.jobs.publication_transaction.steps.map(({ run }) => run ?? "").join("\n")
   assert.doesNotMatch(transactionCommands, /npm pack|napi build|build:facade/)
   assert.match(transactionCommands, /release-publication\.mjs transact/)
@@ -1403,9 +1086,10 @@ test("release workflow keeps the transaction DAG, target CPU bindings, and candi
   assert.doesNotMatch(workflowSource, /verify-(?:js|native)-consumer\.mjs/)
   assert.match(workflowSource, /verify-release-consumer\.mjs local-js/)
   assert.match(workflowSource, /verify-release-consumer\.mjs local-native/)
-  assert.match(workflowSource, /verify-release-consumer\.mjs registry [^\n]*plan\.json[^\n]*matrix\.package\.name/)
-  assert.match(workflowSource, /verify-release-consumer\.mjs registry[\s\S]*plan\.json" okf-search-native/)
-  const nativeConsumerCommands = ["native_candidate_test", "native_post_publish_test"]
+  assert.doesNotMatch(workflowSource, /verify-release-consumer\.mjs registry/)
+  assert.doesNotMatch(workflowSource, /(?:js|native)_post_publish_test/)
+  assert.match(workflowSource, /Validate the plan and publish missing tarballs only/)
+  const nativeConsumerCommands = ["native_candidate_test"]
     .flatMap((job) => parsed.jobs[job].steps.map(({ run }) => run ?? ""))
     .join("\n")
   assert.doesNotMatch(nativeConsumerCommands, /jq .*okf-search-native/)

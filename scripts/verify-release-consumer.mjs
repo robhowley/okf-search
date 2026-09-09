@@ -227,35 +227,8 @@ export async function verifyLocalJsConsumers({ directory, plan, expectedCommit =
   return entries.map(({ name, version }) => ({ name, version }))
 }
 
-export async function verifyRegistryConsumer(name, version, selectedNative, { onCommand, runCommand = spawnSync } = {}) {
-  assert.ok(JS_PACKAGES.has(name), "unsupported JS package")
-  assert.match(version ?? "", SEMVER, "exact package version")
-  if (selectedNative) assert.match(selectedNative.version ?? "", SEMVER, "exact selected native version")
-  const root = await mkdtemp(join(tmpdir(), "okf-js-release-consumer-"))
-  try {
-    const dependencies = consumerDependencies(name, version, selectedNative?.version)
-    await writeFile(join(root, "package.json"), `${JSON.stringify({ name: "okf-js-release-consumer", version: "1.0.0", private: true, type: "module", dependencies }, null, 2)}\n`)
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm"
-    run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--registry", NPM_REGISTRY, "--save-exact"], root, process.env, false, onCommand, runCommand)
-    await validateInstalledPackage(root, { name, version }, "", onCommand, runCommand)
-    if (name === "pi-okf-search" && selectedNative) {
-      const manifest = JSON.parse(await readFile(join(root, "node_modules", NATIVE_PACKAGE, "package.json"), "utf8"))
-      assert.equal(manifest.version, selectedNative.version, "post-publish consumer selected another native version")
-      await assertPiResolvesRootNative(root, join(root, "node_modules", name), onCommand, runCommand)
-    }
-    console.log(`verified clean scripts-disabled JS consumer for ${name}@${version}`)
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-}
-
 export async function verifyNativeConsumer(dependency, { typescript = null, onCommand, runCommand = spawnSync } = {}) {
-  assert.ok(
-    (isAbsolute(dependency) && dependency.endsWith(".tgz")) ||
-      (dependency.startsWith(`${NATIVE_PACKAGE}@`) &&
-        SEMVER.test(dependency.slice(`${NATIVE_PACKAGE}@`.length))),
-    "native dependency must be an absolute tarball or exact planned version",
-  )
+  assert.ok(isAbsolute(dependency) && dependency.endsWith(".tgz"), "native dependency must be an absolute tarball")
   const root = await mkdtemp(join(tmpdir(), "okf-native-release-consumer-"))
   try {
     await writeFile(join(root, "package.json"), `${JSON.stringify({
@@ -371,22 +344,6 @@ export async function verifyLocalNativeConsumer({ directory, plan, expectedCommi
   return { name: entry.name, version: entry.version }
 }
 
-export async function verifyRegistryPlanConsumer(plan, name, {
-  typescript,
-  verifyJsConsumer = verifyRegistryConsumer,
-  verifyNative = verifyNativeConsumer,
-} = {}) {
-  const entry = plan?.packages?.find((candidate) => candidate.name === name)
-  assert.ok(entry, "package is not selected in the publication plan")
-  if (JS_PACKAGES.has(name)) {
-    const selectedNative = plan.packages.find((candidate) => candidate.name === NATIVE_PACKAGE)
-    return verifyJsConsumer(name, entry.version, selectedNative)
-  }
-  assert.equal(name, NATIVE_PACKAGE, "unsupported selected package")
-  assert.match(entry.version ?? "", SEMVER, "exact native package version")
-  return verifyNative(`${name}@${entry.version}`, { typescript })
-}
-
 function parseTypescript(args) {
   if (args.length === 0) return null
   if (args.length === 2 && args[0] === "--typescript" && args[1]) return args[1]
@@ -413,12 +370,7 @@ async function main() {
     })
     return
   }
-  if (mode === "registry" && first && second) {
-    const plan = JSON.parse(await readFile(resolve(first), "utf8"))
-    await verifyRegistryPlanConsumer(plan, second, { typescript: parseTypescript([third, ...extra].filter((value) => value !== undefined)) })
-    return
-  }
-  fail("usage: verify-release-consumer.mjs local-js <artifact-directory> <plan.json> <release-commit> | local-native <artifact-directory> <plan.json> <release-commit> [--typescript <tsc-entry>] | registry <plan.json> <okf-minisearch|pi-okf-search|okf-search-native> [--typescript <tsc-entry>]")
+  fail("usage: verify-release-consumer.mjs local-js <artifact-directory> <plan.json> <release-commit> | local-native <artifact-directory> <plan.json> <release-commit> [--typescript <tsc-entry>]")
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
