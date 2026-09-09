@@ -178,20 +178,32 @@ The returned array is a frozen, sorted snapshot. Values preserve case and includ
 
 `indexStats()` returns a detached, recursively frozen snapshot:
 
-```text
+```ts
 {
   logical: {
-    documents: { total, strict, degraded },
-    types: [{ type, documentCount }],
-    statuses: { draft, stable, deprecated, unclassified },
+    documents: {
+      total: number;
+      strict: number;
+      degraded: number;
+    };
+    types: readonly {
+      type: string;
+      documentCount: number;
+    }[];
+    statuses: {
+      draft: number;
+      stable: number;
+      deprecated: number;
+      unclassified: number;
+    };
     trustTiers: {
-      unverified,
-      machineConfirmed,
-      humanReviewed,
-      unclassified,
-    },
-  },
-  storage: { kind: "unavailable" },
+      unverified: number;
+      machineConfirmed: number;
+      humanReviewed: number;
+      unclassified: number;
+    };
+  };
+  storage: { kind: "unavailable" };
 }
 ```
 

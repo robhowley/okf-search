@@ -71,20 +71,35 @@ and `listDegradedDocuments()` for inspecting the current collection.
 
 `indexStats()` returns a detached, recursively frozen snapshot:
 
-```text
+```ts
 {
   logical: {
-    documents: { total, strict, degraded },
-    types: [{ type, documentCount }],
-    statuses: { draft, stable, deprecated, unclassified },
+    documents: {
+      total: number;
+      strict: number;
+      degraded: number;
+    };
+    types: readonly {
+      type: string;
+      documentCount: number;
+    }[];
+    statuses: {
+      draft: number;
+      stable: number;
+      deprecated: number;
+      unclassified: number;
+    };
     trustTiers: {
-      unverified,
-      machineConfirmed,
-      humanReviewed,
-      unclassified,
-    },
-  },
-  storage: { kind: "in-memory-index-files", indexFileBytes },
+      unverified: number;
+      machineConfirmed: number;
+      humanReviewed: number;
+      unclassified: number;
+    };
+  };
+  storage: {
+    kind: "in-memory-index-files";
+    indexFileBytes: number;
+  };
 }
 ```
 
