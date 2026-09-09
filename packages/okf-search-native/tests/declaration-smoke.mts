@@ -102,16 +102,17 @@ type ExactIndexStorageStats = Assert<Same<
   OkfIndexStorageStats,
   | {
       readonly kind: "in-memory-index-files";
-      readonly indexFileBytes: number;
+      readonly sizeInBytes: number;
     }
   | {
       readonly kind: "serialized-index";
       readonly format: "minisearch-json-utf8";
-      readonly serializedIndexBytes: number;
+      readonly sizeInBytes: number;
     }
-  | {
-      readonly kind: "unavailable";
-    }
+>>;
+type ExactIndexStorageSize = Assert<Same<
+  OkfIndexStats["storage"]["sizeInBytes"],
+  number
 >>;
 
 const unsupported = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
@@ -121,6 +122,8 @@ const validation: OkfValidationResult = validateOkfDocument({
   path: "types.md",
   markdown: "---\ntype: note\n---\n",
 });
+declare const stats: OkfIndexStats;
+const sizeInBytes: number = stats.storage.sizeInBytes;
 const options: OkfSearchOptions = {
   match: "all",
   fields: ["title", "heading", "body"] as const,
@@ -156,7 +159,9 @@ void [
   null as ExactAutoSuggest | null,
   null as ExactIndexStats | null,
   null as ExactIndexStorageStats | null,
+  null as ExactIndexStorageSize | null,
   null as OkfIndexStorageStats | null,
+  sizeInBytes,
   null as OkfLogicalIndexStats | null,
   null as ExactPreparedRemove | null,
   null as IsoDateTime | null,

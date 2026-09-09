@@ -139,13 +139,13 @@ describe("friendly search behavior", () => {
       "types",
     ]);
     expect(Object.keys(stats.storage).sort()).toEqual([
-      "indexFileBytes",
       "kind",
+      "sizeInBytes",
     ]);
     expect(stats.storage.kind).toBe("in-memory-index-files");
     if (stats.storage.kind === "in-memory-index-files") {
-      expect(Number.isSafeInteger(stats.storage.indexFileBytes)).toBe(true);
-      expect(stats.storage.indexFileBytes).toBeGreaterThan(0);
+      expect(Number.isSafeInteger(stats.storage.sizeInBytes)).toBe(true);
+      expect(stats.storage.sizeInBytes).toBeGreaterThan(0);
     }
   });
 

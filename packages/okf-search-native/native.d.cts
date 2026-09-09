@@ -55,7 +55,7 @@ export interface IndexStatusStats {
 
 export interface IndexStorageStats {
   kind: "in-memory-index-files"
-  indexFileBytes: number
+  sizeInBytes: number
 }
 
 export interface IndexTrustTierStats {

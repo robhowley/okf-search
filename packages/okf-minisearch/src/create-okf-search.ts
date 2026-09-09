@@ -400,7 +400,7 @@ function createIndexStatsSnapshot(
     storage: Object.freeze({
       kind: "serialized-index" as const,
       format: "minisearch-json-utf8" as const,
-      serializedIndexBytes: new TextEncoder().encode(serialized).byteLength,
+      sizeInBytes: new TextEncoder().encode(serialized).byteLength,
     }),
   });
 }

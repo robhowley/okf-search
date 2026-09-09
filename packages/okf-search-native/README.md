@@ -98,7 +98,7 @@ and `listDegradedDocuments()` for inspecting the current collection.
   };
   storage: {
     kind: "in-memory-index-files";
-    indexFileBytes: number;
+    sizeInBytes: number;
   };
 }
 ```
@@ -106,7 +106,7 @@ and `listDegradedDocuments()` for inspecting the current collection.
 Logical values count documents, not sections, and change only after a successful
 `ingest` or `remove`. `types` preserves case and is sorted by type. Missing
 effective status or trust-tier metadata counts as `unclassified`.
-`indexFileBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
+`sizeInBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
 process memory and can change without a logical change.
 
 ### Validation

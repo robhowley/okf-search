@@ -215,8 +215,8 @@ pub struct LogicalIndexStats {
 pub struct IndexStorageStats {
     #[napi(ts_type = "\"in-memory-index-files\"")]
     pub kind: String,
-    #[napi(js_name = "indexFileBytes")]
-    pub index_file_bytes: f64,
+    #[napi(js_name = "sizeInBytes")]
+    pub size_in_bytes: f64,
 }
 
 #[napi(object)]
@@ -1186,7 +1186,7 @@ impl Engine {
             },
             storage: IndexStorageStats {
                 kind: "in-memory-index-files".to_owned(),
-                index_file_bytes: usize_to_js_number(
+                size_in_bytes: usize_to_js_number(
                     self.ram_directory.total_mem_usage(),
                     "index file bytes",
                 )?,
@@ -1996,10 +1996,10 @@ mod tests {
         let initial = engine.index_stats().expect("initial stats");
         assert_eq!(initial.storage.kind, "in-memory-index-files");
         assert_eq!(
-            initial.storage.index_file_bytes,
+            initial.storage.size_in_bytes,
             engine.ram_directory.total_mem_usage() as f64
         );
-        assert!(initial.storage.index_file_bytes > 0.0);
+        assert!(initial.storage.size_in_bytes > 0.0);
         assert_eq!(initial.logical.documents.total, 1.0);
 
         let mut invalid = document(strict_section("invalid", "needle"));
@@ -2027,7 +2027,7 @@ mod tests {
         let after_ingest = engine.index_stats().expect("ingest stats");
         assert_eq!(after_ingest.logical.documents.total, 2.0);
         assert_eq!(
-            after_ingest.storage.index_file_bytes,
+            after_ingest.storage.size_in_bytes,
             engine.ram_directory.total_mem_usage() as f64
         );
 
@@ -2036,7 +2036,7 @@ mod tests {
         assert_eq!(after_remove.logical.documents.total, 1.0);
         assert_eq!(after_remove.logical.documents.degraded, 0.0);
         assert_eq!(
-            after_remove.storage.index_file_bytes,
+            after_remove.storage.size_in_bytes,
             engine.ram_directory.total_mem_usage() as f64
         );
     }

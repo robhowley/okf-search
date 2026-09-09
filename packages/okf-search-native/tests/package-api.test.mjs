@@ -177,7 +177,7 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
     degraded: 0,
   });
   assert.equal(preparedStats.storage.kind, "in-memory-index-files");
-  assert.ok(preparedStats.storage.indexFileBytes > 0);
+  assert.ok(preparedStats.storage.sizeInBytes > 0);
   prepared.ingestPrepared(preparedDocument("prepared-added", "prepared-ingest-marker"));
   assert.equal(prepared.search("prepared-ingest-marker", { match: "all" }).length, 1);
   assert.equal(prepared.removeDocument("prepared-added"), true);

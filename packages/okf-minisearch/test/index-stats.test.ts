@@ -40,7 +40,7 @@ const EMPTY_LOGICAL_STATS = {
 const SERIALIZED_STORAGE = {
   kind: "serialized-index",
   format: "minisearch-json-utf8",
-  serializedIndexBytes: expect.any(Number),
+  sizeInBytes: expect.any(Number),
 };
 
 const EMPTY_STATS = {
@@ -52,11 +52,11 @@ function expectSerializedStorage(stats: OkfIndexStats): void {
   expect(stats.storage).toEqual({
     kind: "serialized-index",
     format: "minisearch-json-utf8",
-    serializedIndexBytes: expect.any(Number),
+    sizeInBytes: expect.any(Number),
   });
   if (stats.storage.kind === "serialized-index") {
-    expect(Number.isSafeInteger(stats.storage.serializedIndexBytes)).toBe(true);
-    expect(stats.storage.serializedIndexBytes).toBeGreaterThan(0);
+    expect(Number.isSafeInteger(stats.storage.sizeInBytes)).toBe(true);
+    expect(stats.storage.sizeInBytes).toBeGreaterThan(0);
   }
 }
 
@@ -75,7 +75,7 @@ describe("indexStats", () => {
     expect(Object.keys(stats.storage)).toEqual([
       "kind",
       "format",
-      "serializedIndexBytes",
+      "sizeInBytes",
     ]);
   });
 
@@ -190,7 +190,7 @@ describe("indexStats", () => {
       (prior.storage as {
         kind: string;
         format: string;
-        serializedIndexBytes: number;
+        sizeInBytes: number;
       }).format = "caller";
     }).toThrow(TypeError);
 
@@ -274,10 +274,10 @@ describe("indexStats", () => {
     expect(initial.storage).toMatchObject({
       kind: "serialized-index",
       format: "minisearch-json-utf8",
-      serializedIndexBytes: new TextEncoder().encode(serialized).byteLength,
+      sizeInBytes: new TextEncoder().encode(serialized).byteLength,
     });
     if (initial.storage.kind === "serialized-index") {
-      expect(initial.storage.serializedIndexBytes).toBeGreaterThan(
+      expect(initial.storage.sizeInBytes).toBeGreaterThan(
         serialized.length,
       );
     }

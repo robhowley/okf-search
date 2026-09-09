@@ -144,15 +144,12 @@ export interface OkfLogicalIndexStats {
 export type OkfIndexStorageStats =
   | {
       readonly kind: "in-memory-index-files";
-      readonly indexFileBytes: number;
+      readonly sizeInBytes: number;
     }
   | {
       readonly kind: "serialized-index";
       readonly format: "minisearch-json-utf8";
-      readonly serializedIndexBytes: number;
-    }
-  | {
-      readonly kind: "unavailable";
+      readonly sizeInBytes: number;
     };
 
 export interface OkfIndexStats {

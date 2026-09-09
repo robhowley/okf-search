@@ -527,6 +527,7 @@ const types: readonly string[] = listTypes();
 const remove = null as unknown as OkfSearch["remove"];
 const removalResult: boolean = remove("consumer.md");
 const direct: OkfSearch = createOkfSearch([]);
+const sizeInBytes: number = direct.indexStats().storage.sizeInBytes;
 const opened: Promise<OkfSearch> = openOkf("./knowledge");
 // @ts-expect-error The Node declaration accepts only a filesystem root string.
 openOkf([]);
@@ -581,6 +582,7 @@ void [
   createOkfSearch,
   openOkf,
   direct,
+  sizeInBytes,
   opened,
   validator,
   validationResult,
@@ -847,6 +849,7 @@ type ExactSearchField = Assert<Same<OkfSearchField,
 >>;
 
 const handle: OkfSearch = createOkfSearch([]);
+const sizeInBytes: number = handle.indexStats().storage.sizeInBytes;
 const opened: Promise<OkfSearch> = openOkf(".");
 const validation: OkfValidationResult = validateOkfDocument({
   path: "types.md",
@@ -855,6 +858,7 @@ const validation: OkfValidationResult = validateOkfDocument({
 const unsupported = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 void [
   handle,
+  sizeInBytes,
   opened,
   validation,
   unsupported,
