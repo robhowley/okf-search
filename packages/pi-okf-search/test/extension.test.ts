@@ -5,6 +5,7 @@ import type {
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import {
   validateToolArguments,
   type ToolCall,
@@ -145,6 +146,43 @@ function onlyCommand(pi: FakePi): CapturedCommand {
 function onlyTool(pi: FakePi): ToolDefinition {
   expect(pi.tools).toHaveLength(1);
   return pi.tools[0]!;
+}
+
+type ToolRenderCall = NonNullable<ToolDefinition["renderCall"]>;
+
+const renderTheme = {
+  fg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
+} as Parameters<ToolRenderCall>[1];
+
+function renderCallComponent(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+  lastComponent?: Text,
+): Text {
+  const renderCall = tool.renderCall;
+  expect(renderCall).toBeDefined();
+  const component = renderCall!(
+    args as never,
+    renderTheme,
+    { lastComponent } as Parameters<ToolRenderCall>[2],
+  );
+  expect(component).toBeInstanceOf(Text);
+  if (!(component instanceof Text)) {
+    throw new Error("expected a Text component");
+  }
+  return component;
+}
+
+function renderCallText(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+  lastComponent?: Text,
+): string {
+  return renderCallComponent(tool, args, lastComponent)
+    .render(1_000)
+    .join("\n")
+    .trimEnd();
 }
 
 function makeContext(mode: "json" | "tui" = "json"): TestContext {
@@ -832,6 +870,53 @@ describe("okf_search extension", () => {
 
     expect(tool.promptSnippet).toBe(PROMPT_SNIPPET);
     expect(tool.promptGuidelines).toEqual(PROMPT_GUIDELINES);
+  });
+
+  it("renders the query positionally without runtime defaults", () => {
+    const tool = onlyTool(installExtension());
+
+    expect(renderCallText(tool, { query: "rollback" })).toBe(
+      'okf_search "rollback"',
+    );
+  });
+
+  it("renders submitted options in schema order with JSON values", () => {
+    const tool = onlyTool(installExtension());
+    const args = {
+      where: { types: ["runbook"], tagsAny: [], stale: false },
+      fuzzy: false,
+      fields: [],
+      match: "",
+      limit: 0,
+      query: 'rollback "now"',
+    };
+
+    expect(renderCallText(tool, args)).toBe(
+      'okf_search "rollback \\"now\\"" limit=0 match="" fields=[] fuzzy=false where={"types":["runbook"],"tagsAny":[],"stale":false}',
+    );
+  });
+
+  it("omits absent and transient undefined options", () => {
+    const tool = onlyTool(installExtension());
+
+    expect(
+      renderCallText(tool, {
+        query: "rollback",
+        limit: undefined,
+        fuzzy: undefined,
+      }),
+    ).toBe('okf_search "rollback"');
+  });
+
+  it("tolerates partial arguments and reuses a Text component", () => {
+    const tool = onlyTool(installExtension());
+    const first = renderCallComponent(tool, {});
+
+    expect(first.render(1_000).join("\n").trimEnd()).toBe("okf_search");
+
+    const second = renderCallComponent(tool, { query: "rollback" }, first);
+    expect(second).toBe(first);
+    expect(second.render(1_000).join("\n").trimEnd()).toBe('okf_search "rollback"');
   });
 
   it("forwards execute inputs by identity and formats ordered hits exactly", async () => {

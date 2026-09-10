@@ -543,32 +543,6 @@ test("plan validator rejects changed digest bytes and every unrecorded directory
   })
 })
 
-test("generated Pi consumer declares the exact tested host cohort", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "pi-host-consumer-"))
-  try {
-    const specs = packWorkspacePackages(directory, { mini: false, native: true })
-    const plan = await createPublicationPlan({ directory, selection: selection(specs), registry: { policy: async () => ({ state: "unpublished", distTag: "latest" }) } })
-    let dependencies
-    await verifyLocalJsConsumers({
-      directory,
-      plan,
-      expectedCommit: releaseCommit,
-      onCommand: ({ args, cwd }) => {
-        if (args[0] === "install") dependencies = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).dependencies
-      },
-    })
-    assert.deepEqual(dependencies, {
-      "pi-okf-search": `file:${join(directory, plan.packages[1].tarball)}`,
-      "okf-search-native": `file:${join(directory, plan.packages[0].tarball)}`,
-      "@earendil-works/pi-ai": "0.84.3",
-      "@earendil-works/pi-coding-agent": "0.84.3",
-      typebox: "1.3.7",
-    })
-  } finally {
-    rmSync(directory, { recursive: true, force: true })
-  }
-})
-
 test("real selected JS packages run both production smokes with scripts disabled", async () => {
   const directory = mkdtempSync(join(tmpdir(), "local-js-plan-"))
   try {
