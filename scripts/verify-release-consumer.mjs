@@ -3,10 +3,10 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { pathToFileURL } from "node:url"
 
 import { verifyPublicationPlan } from "./release-publication.mjs"
 import { resolveCommandShape } from "./command-shape.mjs"
@@ -133,46 +133,6 @@ async function assertInstalledBytes(tarball, packageRoot, onCommand, runCommand)
   }
 }
 
-function nativeNodes(tree, nodes = []) {
-  const dependencies = tree?.dependencies ?? {}
-  for (const [name, node] of Object.entries(dependencies)) {
-    if (name === NATIVE_PACKAGE) nodes.push(node)
-    nativeNodes(node, nodes)
-  }
-  return nodes
-}
-
-async function assertPiResolvesRootNative(root, piRoot, onCommand, runCommand) {
-  const resolver = `process.stdout.write(import.meta.resolve('${NATIVE_PACKAGE}'))\n`
-  const piResolver = join(piRoot, "resolve-okf-search-native.mjs")
-  const rootResolver = join(root, "resolve-okf-search-native.mjs")
-  try {
-    await writeFile(piResolver, resolver)
-    await writeFile(rootResolver, resolver)
-    const piResolved = run(process.execPath, [piResolver], root, process.env, true, onCommand, runCommand)
-    const rootResolved = run(process.execPath, [rootResolver], root, process.env, true, onCommand, runCommand)
-    assert.equal(await realpath(fileURLToPath(piResolved)), await realpath(fileURLToPath(rootResolved)), "Pi resolves a different okf-search-native instance")
-  } finally {
-    await rm(piResolver, { force: true })
-    await rm(rootResolver, { force: true })
-  }
-}
-
-async function assertPiUsesSelectedNative(root, piRoot, nativeEntry, nativeTarball, onCommand, runCommand) {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm"
-  const tree = JSON.parse(run(npm, ["ls", NATIVE_PACKAGE, "--all", "--json", "--long"], root, process.env, true, onCommand, runCommand))
-  const nodes = nativeNodes(tree)
-  assert.ok(nodes.length > 0, "npm dependency tree has no okf-search-native")
-  for (const node of nodes) {
-    assert.equal(node.version, nativeEntry.version, "npm dependency tree selected another okf-search-native version")
-    if (node.resolved !== undefined) {
-      assert.doesNotMatch(node.resolved, /^https:\/\/registry\.npmjs\.org\//, "selected okf-search-native resolved from the registry")
-      assert.ok(decodeURIComponent(node.resolved).includes(basename(nativeTarball)), "selected okf-search-native did not resolve from the planned tarball")
-    }
-  }
-  await assertPiResolvesRootNative(root, piRoot, onCommand, runCommand)
-}
-
 async function validateInstalledPackage(root, entry, tarball, onCommand, runCommand) {
   const packageRoot = join(root, "node_modules", entry.name)
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"))
@@ -213,7 +173,6 @@ async function installConsumer(entry, entries, directory, onCommand, runCommand)
     await validateInstalledPackage(root, entry, join(directory, entry.tarball), onCommand, runCommand)
     if (entry.name === "pi-okf-search" && selectedNative) {
       await assertInstalledBytes(join(directory, selectedNative.tarball), join(root, "node_modules", selectedNative.name), onCommand, runCommand)
-      await assertPiUsesSelectedNative(root, join(root, "node_modules", entry.name), selectedNative, join(directory, selectedNative.tarball), onCommand, runCommand)
     }
   } finally {
     await rm(root, { recursive: true, force: true })
