@@ -99,13 +99,9 @@ const SEARCH_PARAMETERS = Type.Object(
   { additionalProperties: false },
 );
 
-const SEARCH_RENDER_OPTIONS = [
-  "limit",
-  "match",
-  "fields",
-  "fuzzy",
-  "where",
-] as const;
+const SEARCH_RENDER_OPTIONS = Object.keys(SEARCH_PARAMETERS.properties).filter(
+  (key) => key !== "query",
+);
 
 function formatSearchCall(args: unknown, theme: Theme): string {
   const rawArgs =
