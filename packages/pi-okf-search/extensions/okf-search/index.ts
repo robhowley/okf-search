@@ -1,5 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 import {
@@ -97,6 +98,42 @@ const SEARCH_PARAMETERS = Type.Object(
   },
   { additionalProperties: false },
 );
+
+const SEARCH_RENDER_OPTIONS = [
+  "limit",
+  "match",
+  "fields",
+  "fuzzy",
+  "where",
+] as const;
+
+function formatSearchCall(args: unknown, theme: Theme): string {
+  const rawArgs =
+    args !== null && typeof args === "object"
+      ? (args as Record<string, unknown>)
+      : {};
+  let text = theme.fg("toolTitle", theme.bold("okf_search"));
+
+  if (Object.hasOwn(rawArgs, "query")) {
+    const query = JSON.stringify(rawArgs.query);
+    if (query !== undefined) {
+      text += ` ${theme.fg("accent", query)}`;
+    }
+  }
+
+  for (const key of SEARCH_RENDER_OPTIONS) {
+    if (!Object.hasOwn(rawArgs, key)) {
+      continue;
+    }
+
+    const value = JSON.stringify(rawArgs[key]);
+    if (value !== undefined) {
+      text += ` ${theme.fg("toolOutput", `${key}=${value}`)}`;
+    }
+  }
+
+  return text;
+}
 
 function formatHeading(title: string, headingPath: string): string {
   if (headingPath === "" || headingPath === title) {
@@ -241,6 +278,14 @@ export default function okfSearchExtension(pi: ExtensionAPI): void {
       "Read the cited source when the excerpt is insufficient.",
     ],
     parameters: SEARCH_PARAMETERS,
+    renderCall(args, theme, context) {
+      const text =
+        context.lastComponent instanceof Text
+          ? context.lastComponent
+          : new Text("", 0, 0);
+      text.setText(formatSearchCall(args, theme));
+      return text;
+    },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const hits = await runtime.search(ctx, params, signal);
       return {
