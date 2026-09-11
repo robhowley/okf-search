@@ -118,7 +118,9 @@ version = "0.0.0"
 dependencies = [
  "comrak",
  "finl_unicode",
+ "hashlink",
  "saphyr",
+ "saphyr-parser",
  "time",
  "unicode-normalization",
 ]

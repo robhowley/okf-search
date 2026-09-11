@@ -9,7 +9,6 @@ import { assertPrivateCorpus, fingerprintCorpusFiles } from "../../okf-prepare/s
 import { repoRoot, smallInputs } from "./comparison-inputs.mjs";
 import { capture, compareCaptures, decode, differences, encode } from "./comparison-values.mjs";
 
-export const BASELINE = "736b4ec7e23ddb78d9c73fe366f1c97230d1c2b2";
 const script = fileURLToPath(import.meta.url);
 const nativeRoot = resolve(repoRoot, "packages/okf-prepare-native");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -88,9 +87,10 @@ export async function runChild(request, result, timeout = 120000) {
 export async function run(args) {
   process.umask(0o077);
   let options;
+  let initialCommit;
   try {
     options = parseArgs(args);
-    if (git("rev-parse", "HEAD").trim() !== BASELINE) return 2;
+    initialCommit = git("rev-parse", "HEAD").trim();
     const parent = await realpath(dirname(options.out));
     options.out = resolve(parent, options.out.split(/[\\/]/).at(-1));
     if (inside(await realpath(repoRoot), options.out) || ((await stat(parent)).mode & 0o077)) return 2;
@@ -122,7 +122,7 @@ export async function run(args) {
   try {
     await updateManifest();
     manifest.before = await checkoutProvenance();
-    if (manifest.before.commit !== BASELINE) throw new Error("Baseline changed");
+    if (manifest.before.commit !== initialCommit) throw new Error("Checkout commit changed");
     let entries;
     phase = "input";
     if (suite === "small") entries = await smallInputs();

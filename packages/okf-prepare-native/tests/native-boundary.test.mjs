@@ -59,6 +59,53 @@ test("raw loader calls Rust with opaque identity and explicit fallback, without 
   assert.doesNotMatch(bundle, /mdast-util|yaml\/dist|function analyzeOkf|function prepareOkf/);
 });
 
+test("duplicate YAML mapping keys are fatal in native preparation and validation", () => {
+  for (const yaml of [
+    "type: note\ntitle: one\ntitle: two",
+    "type: note\nmetadata:\n  name: one\n  name: two",
+    "type: note\nitems:\n  - name: one\n    name: two",
+    "type: note\nname: one\n\"name\": two",
+  ]) {
+    const input = document(yaml);
+    assert.deepEqual(prepare(input), { kind: "fatal", diagnostics: [parseError] });
+    assert.deepEqual(validate(input), { isValid: false, isIndexable: false, errors: [parseError] });
+  }
+});
+
+test("native heading text/IDs and final content line are retained", () => {
+  for (const [body, headingPath, id] of [
+    ["## alpha**beta**gamma", "alphabetagamma", "note#alphabetagamma"],
+    ["## Alpha **beta** gamma", "Alpha beta gamma", "note#alpha-beta-gamma"],
+  ]) {
+    const result = prepare(document("type: note", body));
+    assert.equal(result.sections[0].headingPath, headingPath);
+    assert.equal(result.sections[0].id, id);
+  }
+  for (const [body, endLine] of [["```\none\n", 5], ["```\none", 5], ["```\none\n```\n", 6]]) {
+    const result = prepare(document("type: note", body));
+    assert.equal(result.sections[0].startLine, 4);
+    assert.equal(result.sections[0].endLine, endLine);
+  }
+});
+
+test("native YAML subset and resource failures preserve parse diagnostics", { timeout: 10000 }, () => {
+  let bomb = "type: note\na0: &a0 [x]\n";
+  for (let i = 1; i < 40; i++) bomb += `a${i}: &a${i} [*a${i - 1}, *a${i - 1}]\n`;
+  for (const yaml of [
+    "type: note\nx: &x {self: *x}",
+    "type: note\nx: !!timestamp 2026-08-24",
+    "type: note\nx: !!binary SGVsbG8=",
+    'type: note\nx: "\\uD800"',
+    `type: note\nx: ${"[".repeat(64)}0${"]".repeat(64)}`,
+    `type: note\n#${"x".repeat(1024 * 1024)}`,
+    bomb,
+  ]) {
+    assert.deepEqual(prepare(document(yaml)), { kind: "fatal", diagnostics: [parseError] });
+    assert.deepEqual(validate(document(yaml)), { isValid: false, isIndexable: false, errors: [parseError] });
+  }
+  assert.equal(prepare(document("type: note\nx: &x {a: one}\ny: *x")).kind, "accepted");
+});
+
 const rich = document(`type: custom type
 title: ""
 description: ""

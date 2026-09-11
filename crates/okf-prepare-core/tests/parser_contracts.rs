@@ -44,6 +44,91 @@ fn yaml_rejects_non_string_mapping_keys_at_any_depth() {
 }
 
 #[test]
+fn yaml_rejects_duplicate_string_keys_at_any_mapping_depth() {
+    for source in [
+        "first: one\nfirst: two",
+        "outer:\n  first: one\n  first: two",
+        "items:\n  - first: one\n    first: two",
+        "first: one\n\"first\": two",
+    ] {
+        assert!(YamlOwned::load_from_str(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn yaml_accepts_distinct_string_keys_and_ordinary_aliases() {
+    for source in [
+        "first: one\nsecond: two",
+        "outer:\n  first: one\n  second: two",
+        "items:\n  - first: one\n    second: two",
+        "anchor: &name value\nalias: *name",
+    ] {
+        assert!(YamlOwned::load_from_str(source).is_ok(), "{source}");
+    }
+}
+
+#[test]
+fn yaml_resource_limits_accept_boundaries_and_reject_before_expansion() {
+    for (source, accepted) in [
+        ("x".repeat(1024 * 1024), true),
+        ("x".repeat(1024 * 1024 + 1), false),
+        (format!("{}0{}", "[".repeat(63), "]".repeat(63)), true),
+        (format!("{}0{}", "[".repeat(64), "]".repeat(64)), false),
+        (format!("[{}]", vec!["0"; 99_999].join(",")), true),
+        (format!("[{}]", vec!["0"; 100_000].join(",")), false),
+        (
+            format!("[&a {},{}]", "x".repeat(1024), vec!["*a"; 8190].join(",")),
+            true,
+        ),
+        (
+            format!("[&a {},{}]", "x".repeat(1024), vec!["*a"; 8191].join(",")),
+            false,
+        ),
+    ] {
+        assert_eq!(
+            YamlOwned::load_from_str(&source).is_ok(),
+            accepted,
+            "length {}",
+            source.len()
+        );
+    }
+    let mut bomb = String::from("a0: &a0 [x]\n");
+    for i in 1..40 {
+        bomb.push_str(&format!("a{i}: &a{i} [*a{}, *a{}]\n", i - 1, i - 1));
+    }
+    assert!(
+        YamlOwned::load_from_str(&bomb)
+            .unwrap_err()
+            .message
+            .contains("expansion")
+    );
+    // Shallow syntax can still create a deeply nested expanded value.
+    let mut deep = String::from("a0: &a0 x\n");
+    for i in 1..64 {
+        deep.push_str(&format!("a{i}: &a{i} [*a{}]\n", i - 1));
+    }
+    assert!(
+        YamlOwned::load_from_str(&deep)
+            .unwrap_err()
+            .message
+            .contains("nesting")
+    );
+}
+
+#[test]
+fn yaml_native_subset_rejects_graphs_unsupported_tags_and_invalid_unicode() {
+    for source in [
+        "x: &x {self: *x}",
+        "x: !!timestamp 2026-08-24",
+        "x: !!binary SGVsbG8=",
+        r#"x: "\uD800""#,
+    ] {
+        assert!(YamlOwned::load_from_str(source).is_err(), "{source}");
+    }
+    assert!(YamlOwned::load_from_str("x: &x {a: one}\ny: *x").is_ok());
+}
+
+#[test]
 fn markdown_projects_only_root_blocks_and_slices_original_lines() {
     let source = "# Root\r\n\r\n> ## Nested\r\n\r\nbody one\r\nbody two\r\n## Child";
     let blocks = project(source);

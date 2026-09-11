@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import { oracleInputs } from "../../okf-prepare/scripts/oracle-inputs.mjs";
 import { assertPrivateCorpus, PRIVATE_CORPUS } from "../../okf-prepare/scripts/corpus-support.mjs";
-import { smallInputs, transportExclusion, yamlIds } from "../scripts/comparison-inputs.mjs";
+import { repoRoot, smallInputs, transportExclusion, yamlIds } from "../scripts/comparison-inputs.mjs";
 import { capture, compareCaptures, decode, differences, encode, project, validatePreparation, validateValidation } from "../scripts/comparison-values.mjs";
-import { captureInput, parseArgs, runChild } from "../scripts/compare-js.mjs";
+import { captureInput, parseArgs, run, runChild } from "../scripts/compare-js.mjs";
 import * as js from "../../okf-prepare/dist/index.js";
 import * as native from "../dist/index.js";
 
@@ -145,6 +146,23 @@ test("real sequential child captures synthetic inputs twice with private typed a
     const rejected = resolve(directory, "oversized.jsonl");
     await assert.rejects(runChild(request, rejected), /failed or timed out/);
     assert.equal(JSON.parse(await readFile(`${rejected}.error.json`, "utf8")).message, "Invalid chunk");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("real small runner accepts the current commit and records unchanged source provenance", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "okf-comparison-runner-test-"));
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
+  try {
+    const out = resolve(directory, "small");
+    assert.equal(await run(["--suite", "small", "--out", out]), 0);
+    const manifest = JSON.parse(await readFile(resolve(out, "manifest.json"), "utf8"));
+    assert.equal(manifest.before.commit, commit);
+    assert.equal(typeof manifest.before.dirty, "string");
+    assert.ok(manifest.before.hashes["packages/okf-prepare-native/scripts/compare-js.mjs"]);
+    assert.deepEqual(manifest.before, manifest.after);
+    assert.equal(manifest.state, "capture-complete-unclassified");
+    assert.equal(manifest.counts.captured, 72);
+    assert.equal(manifest.inputs.length, 72);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
