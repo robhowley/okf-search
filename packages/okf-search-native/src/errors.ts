@@ -52,3 +52,39 @@ function message(
       return `Unsupported OKF operation: ${path}`;
   }
 }
+
+export const POISON_MARKER = /^\[ERR_OKF_INDEX_UNUSABLE\](?: |$)/;
+const NATIVE_MARKER = /^\[ERR_OKF_[A-Z_]+\](?: |$)/;
+const INVALID_SEARCH_OPTIONS_MARKER =
+  /^\[ERR_OKF_INVALID_SEARCH_OPTIONS\](?: |$)/;
+
+export function throwNativeError(error: unknown, path: string): never {
+  const message = nativeMessage(error);
+  if (!NATIVE_MARKER.test(message)) throw error;
+
+  if (typeof error === "object" && error !== null && "code" in error && "path" in error) {
+    const detail = error as { code: string; path: string; field?: string; cause?: unknown };
+    if (detail.code === "ERR_OKF_FIELD" || detail.code === "ERR_OKF_PARSE" || detail.code === "ERR_OKF_READ") {
+      throw new OkfError(detail.code, detail.path, {
+        ...(detail.field === undefined ? {} : { field: detail.field }),
+        ...(detail.cause === undefined ? {} : { cause: new Error(String(detail.cause)) }),
+      });
+    }
+  }
+  if (POISON_MARKER.test(message)) {
+    throw new OkfError("ERR_OKF_INDEX_UNUSABLE", path);
+  }
+
+  const sanitized = message.replace(NATIVE_MARKER, "").trim();
+  throw INVALID_SEARCH_OPTIONS_MARKER.test(message)
+    ? new TypeError(sanitized)
+    : new Error(sanitized || "Native OKF search failed");
+}
+
+export function nativeMessage(error: unknown): string {
+  // Callers must finish executing caller-owned code before entering translation.
+  const message = error instanceof Error
+    ? Object.getOwnPropertyDescriptor(error, "message")?.value
+    : undefined;
+  return typeof message === "string" ? message : "";
+}

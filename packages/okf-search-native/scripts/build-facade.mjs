@@ -11,16 +11,6 @@ const repositoryRoot = resolve(packageRoot, "../..");
 const entrypoint = join(packageRoot, "src", "index.ts");
 const defaultOutputDirectory = join(packageRoot, "dist");
 const nativeSpecifier = "../native.cjs";
-const privateEntries = new Map([
-  [
-    "@okf-internal/prepare",
-    join(repositoryRoot, "packages", "okf-prepare", "src", "index.ts"),
-  ],
-  [
-    "@okf-internal/prepare/node",
-    join(repositoryRoot, "packages", "okf-prepare", "src", "node.ts"),
-  ],
-]);
 
 export async function buildNativeFacade({
   outputDirectory = defaultOutputDirectory,
@@ -44,16 +34,10 @@ export async function buildNativeFacade({
       format,
       target: "node22",
       external: [nativeSpecifier],
-      plugins: [privateSourcePlugin()],
       legalComments: "none",
       logLevel: "silent",
       metafile,
       sourcemap: false,
-      ...(format === "esm" ? {
-        banner: {
-          js: 'import { createRequire as __okfCreateRequire } from "node:module"; const require = __okfCreateRequire(import.meta.url);',
-        },
-      } : {}),
     });
     javascriptBuilds.push({ filename, format, metafile: result.metafile });
   }
@@ -61,7 +45,7 @@ export async function buildNativeFacade({
   const declarationBundle = await rollup({
     input: entrypoint,
     external: (id) => id === nativeSpecifier,
-    plugins: [privateDeclarationSourcePlugin(), dts({ respectExternal: false })],
+    plugins: [dts({ respectExternal: false })],
     onwarn(warning) {
       throw new Error(`Rollup warning: ${warning.message}`);
     },
@@ -101,26 +85,6 @@ export async function buildNativeFacade({
   return { javascriptBuilds };
 }
 
-export function privateSourcePlugin() {
-  return {
-    name: "resolve-private-prepare-source",
-    setup(build) {
-      build.onResolve({ filter: /^@okf-internal\/prepare(?:\/node)?$/ }, (args) => {
-        const path = privateEntries.get(args.path);
-        return path ? { path } : undefined;
-      });
-    },
-  };
-}
-
-export function privateDeclarationSourcePlugin() {
-  return {
-    name: "resolve-private-prepare-declarations",
-    resolveId(id) {
-      return privateEntries.get(id) ?? null;
-    },
-  };
-}
 
 if (
   process.argv[1] &&

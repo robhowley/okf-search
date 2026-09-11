@@ -1,9 +1,11 @@
 #![deny(clippy::all)]
 
-#[cfg(test)]
 mod filesystem;
-#[cfg(test)]
 mod preparation;
+mod raw_api;
+use napi::{Env, bindgen_prelude::Utf16String};
+use preparation::{PreparationError, PreparedEntry};
+use raw_api::{decode, identity, ingest_result, invalid, preparation_error, prepare, snapshot};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound;
@@ -1694,9 +1696,7 @@ fn native_error(error: EngineError) -> Error {
     Error::new(status, error.to_string())
 }
 
-/// Native search handle. The public TypeScript adapter should keep accepting
-/// raw Markdown and use the existing OKF parser/projector before crossing this
-/// boundary.
+/// Native search handle for raw Markdown and the existing prepared-document API.
 #[napi]
 pub struct NativeOkfSearch {
     inner: Mutex<Engine>,
@@ -1768,6 +1768,88 @@ impl NativeOkfSearch {
         ))
     }
 }
+
+#[napi]
+impl NativeOkfSearch {
+    #[napi(js_name = "validateRaw", ts_return_type = "unknown")]
+    pub fn validate_raw(env: Env, input: Object<'_>) -> Result<Object<'static>, Error> {
+        raw_api::validate_raw(env, input)
+    }
+
+    #[napi(js_name = "openRaw", ts_return_type = "Promise<NativeOkfSearch>")]
+    pub fn open_raw(root: Utf16String) -> napi::bindgen_prelude::AsyncTask<raw_api::OpenTask> {
+        raw_api::open_raw(root)
+    }
+
+    #[napi(factory, js_name = "fromRaw")]
+    pub fn from_raw(env: Env, inputs: Vec<Object<'_>>) -> Result<Self, Error> {
+        // Vec conversion copies batch membership before any document getter runs.
+        let snapshots = inputs
+            .into_iter()
+            .map(snapshot)
+            .collect::<NapiResult<Vec<_>>>()?;
+        let entries = (|| -> std::result::Result<Vec<PreparedEntry>, PreparationError> {
+            let mut normalized = Vec::with_capacity(snapshots.len());
+            for (path, markdown) in snapshots {
+                normalized.push((identity(path)?, markdown));
+            }
+            normalized.sort_by(|a, b| preparation::compare_paths(&a.0.path, &b.0.path));
+            for pair in normalized.windows(2) {
+                if pair[0].0.document_id == pair[1].0.document_id {
+                    return Err(invalid("ERR_OKF_FIELD", &pair[1].0.path, Some("path")));
+                }
+            }
+            normalized
+                .into_iter()
+                .map(|(identity, markdown)| {
+                    let markdown = decode(&markdown, "ERR_OKF_PARSE", &identity.path, None)?;
+                    preparation::prepare_normalized(identity, &markdown)
+                })
+                .collect()
+        })()
+        .map_err(|error| preparation_error(&env, error))?;
+        let documents = entries
+            .into_iter()
+            .map(PreparedEntry::into_document)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(native_error)?;
+        Self::from_prepared(documents)
+    }
+
+    #[napi(js_name = "assertUsable")]
+    pub fn assert_usable(&self) -> Result<(), Error> {
+        self.inner.lock().usable().map_err(native_error)
+    }
+
+    #[napi(js_name = "ingestRaw", ts_return_type = "unknown")]
+    pub fn ingest_raw(&self, env: Env, input: Object<'_>) -> Result<Object<'static>, Error> {
+        self.inner.lock().usable().map_err(native_error)?;
+        // No engine lock survives across caller-owned getters.
+        let entry = prepare(snapshot(input)?).map_err(|error| preparation_error(&env, error))?;
+        let response = ingest_result(&env, &entry)?;
+        let path = entry.identity.path.clone();
+        let document = entry.into_document().map_err(native_error)?;
+        self.inner
+            .lock()
+            .ingest(document)
+            .map_err(|error| raw_api::mutation_error(&env, error, &path))?;
+        Ok(response)
+    }
+
+    #[napi(js_name = "removePath")]
+    pub fn remove_path(&self, env: Env, path: Utf16String) -> Result<bool, Error> {
+        self.inner.lock().usable().map_err(native_error)?;
+        let identity = identity(path).map_err(|error| preparation_error(&env, error))?;
+        self.inner
+            .lock()
+            .remove(&identity.document_id)
+            .map_err(|error| raw_api::mutation_error(&env, error, &identity.path))
+    }
+}
+
+#[cfg(feature = "test-fixtures")]
+#[path = "../tests/fixtures/poison.rs"]
+pub mod poison_fixture;
 
 #[cfg(test)]
 mod tests {
@@ -2718,11 +2800,13 @@ mod tests {
         .expect("baseline");
         add_record_without_title(&mut native.inner.lock());
 
-        assert_napi_unusable(native.search("corruptneedle".to_owned(), None));
-        assert_napi_unusable(native.search("healthy".to_owned(), None));
-        assert_napi_unusable(native.index_stats());
-        assert_napi_unusable(native.list_types());
-        assert_napi_unusable(native.list_degraded_documents());
+        // JS error projection requires a live Env; the addon fixture test checks
+        // these exported methods. Keep the corruption/state transition proof here.
+        assert_napi_unusable(native.inner.lock().search("corruptneedle", None));
+        assert_napi_unusable(native.inner.lock().search("healthy", None));
+        assert_napi_unusable(native.inner.lock().index_stats().map_err(native_error));
+        assert_napi_unusable(native.inner.lock().list_types().map_err(native_error));
+        assert_napi_unusable(native.inner.lock().list_degraded().map_err(native_error));
         assert_napi_unusable(native.auto_suggest("healthy".to_owned(), None));
         assert_napi_unusable(native.ingest_prepared(document(strict_section("second", "healthy"))));
         assert_napi_unusable(native.remove_document("first".to_owned()));

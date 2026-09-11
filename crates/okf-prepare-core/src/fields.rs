@@ -126,7 +126,29 @@ pub struct ProjectedFields {
     pub computation: Option<String>,
     pub executor: Option<Executor>,
     pub attester: Option<Attester>,
+    /// Unknown top-level frontmatter, retained without reparsing for strict responses.
+    pub extensions: Vec<(String, YamlOwned)>,
 }
+
+// Keep this vocabulary identical to the historical preparation implementation.
+const STANDARD_KEYS: &[&str] = &[
+    "type",
+    "title",
+    "description",
+    "resource",
+    "tags",
+    "sources",
+    "usage_window",
+    "generated",
+    "verified",
+    "status",
+    "stale_after",
+    "runtime",
+    "parameters",
+    "computation",
+    "executor",
+    "attester",
+];
 
 pub(crate) fn project(
     yaml: &YamlValue,
@@ -241,6 +263,11 @@ pub(crate) fn project(
         computation,
         executor,
         attester,
+        extensions: data
+            .iter()
+            .filter(|(key, _)| !STANDARD_KEYS.contains(&key.as_str()))
+            .cloned()
+            .collect(),
     };
 
     (fields, type_.is_some(), diagnostics)

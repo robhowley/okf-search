@@ -21,15 +21,43 @@ import { dts } from "rollup-plugin-dts";
 
 import {
   buildNativeFacade,
-  privateDeclarationSourcePlugin,
-  privateSourcePlugin,
 } from "../packages/okf-search-native/scripts/build-facade.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const privateEntries = new Map([
+  [
+    "@okf-internal/prepare",
+    join(repoRoot, "packages", "okf-prepare", "src", "index.ts"),
+  ],
+  [
+    "@okf-internal/prepare/node",
+    join(repoRoot, "packages", "okf-prepare", "src", "node.ts"),
+  ],
+]);
+
+export function privateSourcePlugin() {
+  return {
+    name: "resolve-private-prepare-source",
+    setup(build) {
+      build.onResolve({ filter: /^@okf-internal\/prepare(?:\/node)?$/ }, (args) => {
+        const path = privateEntries.get(args.path);
+        return path ? { path } : undefined;
+      });
+    },
+  };
+}
+
+export function privateDeclarationSourcePlugin() {
+  return {
+    name: "resolve-private-prepare-declarations",
+    resolveId(id) {
+      return privateEntries.get(id) ?? null;
+    },
+  };
+}
+
 const privateSpecifier = "@okf-internal/prepare";
 const privateSource = join(repoRoot, "packages", "okf-prepare", "src", "index.ts");
-const privatePrepareSource = join(repoRoot, "packages", "okf-prepare", "src", "prepare.ts");
-const privateNodeSource = join(repoRoot, "packages", "okf-prepare", "src", "node.ts");
 const expectedExports = ["createPrepareBundleSentinel"];
 const nativeFacadeExports = [
   "OkfError",
@@ -56,10 +84,6 @@ const targets = {
     ],
   },
   native: {
-    privateSources: [
-      { label: privateSpecifier, paths: [privateSource, privatePrepareSource] },
-      { label: `${privateSpecifier}/node`, paths: [privateNodeSource] },
-    ],
     external: [nativeSpecifier],
   },
 };
@@ -333,7 +357,9 @@ try {
     for (const artifact of javascriptBuilds) {
       const label = `native index ${artifact.format}`;
       assert.ok(artifact.metafile, `${label}: facade builder returned no metafile`);
-      await assertPrivateBytes(artifact.metafile, selected.privateSources, label);
+      for (const input of Object.keys(artifact.metafile.inputs)) {
+        assert.doesNotMatch(input, /okf-prepare|prepared-to-native|yaml|mdast|micromark/, `${label}: JS preparation input shipped`);
+      }
       assertExternalRuntimeModules(artifact.metafile, selected.external, label);
       assertNoPrivateReference(
         await readFile(join(outputDirectory, artifact.filename), "utf8"),
@@ -346,7 +372,9 @@ try {
     }
   }
   await buildDeclarations(temporaryRoot);
-  console.log(`${targetName}: private JS and declaration bundling proof passed`);
+  console.log(targetName === "native"
+    ? "native: JS preparation absent; facade and declarations passed"
+    : "minisearch: private JS and declaration bundling proof passed");
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }

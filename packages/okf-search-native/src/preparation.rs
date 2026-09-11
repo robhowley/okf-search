@@ -20,8 +20,74 @@ pub(super) struct PreparedEntry {
     pub prepared: Prepared,
 }
 
+impl PreparedEntry {
+    pub fn into_document(self) -> Result<crate::PreparedDocument, crate::EngineError> {
+        let Prepared::Accepted {
+            document_id,
+            fields,
+            conformance,
+            diagnostics,
+            sections,
+            ..
+        } = self.prepared
+        else {
+            return Err(crate::EngineError::Invalid(
+                "Fatal preparation cannot be indexed".into(),
+            ));
+        };
+        let line_number = |line: usize| {
+            if line as u128 > crate::MAX_SAFE_INTEGER {
+                Err(crate::EngineError::UnsafeInteger(
+                    "Line exceeds JavaScript safe integer range".into(),
+                ))
+            } else {
+                Ok(line as f64)
+            }
+        };
+        Ok(crate::PreparedDocument {
+            document_id,
+            path: self.identity.path,
+            document_type: fields.type_,
+            conformance: conformance.as_str().into(),
+            diagnostics: diagnostics
+                .into_iter()
+                .map(|diagnostic| crate::Diagnostic {
+                    code: diagnostic.code.into(),
+                    message: diagnostic.message,
+                    field: diagnostic.field,
+                    path: diagnostic.path,
+                })
+                .collect(),
+            title: fields.title,
+            tags: fields.tags,
+            status: fields.status.map(|status| status.as_str().into()),
+            stale_after_epoch: fields
+                .staleness
+                .stale_after
+                .map(|value| value.epoch_millis as f64),
+            staleness_classified: fields.staleness.classified,
+            trust_tier: fields.trust_tier.map(|trust| trust.as_str().into()),
+            resource: fields.resource.unwrap_or_default(),
+            description: fields.description.unwrap_or_default(),
+            source_text: fields.source_text,
+            sections: sections
+                .into_iter()
+                .map(|section| {
+                    Ok(crate::PreparedSection {
+                        section_id: section.id,
+                        heading_path: section.heading_path,
+                        text: section.text,
+                        start_line: line_number(section.start_line)?,
+                        end_line: line_number(section.end_line)?,
+                    })
+                })
+                .collect::<Result<_, crate::EngineError>>()?,
+        })
+    }
+}
+
 #[derive(Debug)]
-pub(super) struct PreparationError {
+pub struct PreparationError {
     pub code: &'static str,
     pub path: String,
     pub field: Option<String>,
@@ -164,32 +230,37 @@ pub(super) fn prepare_batch(
             .collect(),
     )?
     .into_iter()
-    .map(|(identity, markdown)| {
-        let prepared = okf_prepare_core::prepare(
-            Input {
-                path: &identity.path,
-                markdown: &markdown,
-                fallback_title: &fallback_title(&identity.document_id),
-            },
-            &identity.document_id,
-        );
-        if let Prepared::Fatal { diagnostics } = prepared {
-            // The core's fatal outcomes are parser failure or invalid required type.
-            let fatal = diagnostics
-                .iter()
-                .find(|d| d.code == "ERR_OKF_PARSE" || d.field.as_deref() == Some("type"))
-                .expect("core fatal diagnostic");
-            return Err(PreparationError {
-                code: fatal.code,
-                path: fatal.path.clone(),
-                field: fatal.field.clone(),
-                cause: None,
-                diagnostics,
-            });
-        }
-        Ok(PreparedEntry { identity, prepared })
-    })
+    .map(|(identity, markdown)| prepare_normalized(identity, &markdown))
     .collect()
+}
+
+pub(super) fn prepare_normalized(
+    identity: Identity,
+    markdown: &str,
+) -> Result<PreparedEntry, PreparationError> {
+    let prepared = okf_prepare_core::prepare(
+        Input {
+            path: &identity.path,
+            markdown,
+            fallback_title: &fallback_title(&identity.document_id),
+        },
+        &identity.document_id,
+    );
+    if let Prepared::Fatal { diagnostics } = prepared {
+        // The core's fatal outcomes are parser failure or invalid required type.
+        let fatal = diagnostics
+            .iter()
+            .find(|d| d.code == "ERR_OKF_PARSE" || d.field.as_deref() == Some("type"))
+            .expect("core fatal diagnostic");
+        return Err(PreparationError {
+            code: fatal.code,
+            path: fatal.path.clone(),
+            field: fatal.field.clone(),
+            cause: None,
+            diagnostics,
+        });
+    }
+    Ok(PreparedEntry { identity, prepared })
 }
 
 #[cfg(test)]
@@ -200,6 +271,63 @@ mod tests {
         DocumentInput {
             path: path.into(),
             markdown: markdown.into(),
+        }
+    }
+
+    #[test]
+    fn core_output_uses_existing_engine_replacement_and_inventory() {
+        let markdown = "---\ntype: note\ntitle: Native title\nstatus: draft\nverified: []\nstale_after: '2026-01-01T00:00:00Z'\nsources: [{resource: source, title: Source title}]\ncustom: retained only for response\n---\n# Heading\nNative body";
+        let document = prepare_normalized(normalize_identity("a.md").unwrap(), markdown)
+            .unwrap()
+            .into_document()
+            .unwrap();
+        assert_eq!(document.title, "Native title");
+        assert_eq!(document.status.as_deref(), Some("draft"));
+        assert_eq!(document.trust_tier.as_deref(), Some("unverified"));
+        assert!(document.staleness_classified);
+        assert!(document.stale_after_epoch.is_some());
+        assert!(document.source_text.contains("Source title"));
+        assert_eq!(document.sections[0].heading_path, "Heading");
+        let mut engine = crate::Engine::new(vec![document]).unwrap();
+        assert_eq!(engine.list_types().unwrap(), ["note"]);
+        let replacement = prepare_normalized(
+            normalize_identity("a.md").unwrap(),
+            "---\ntype: replacement\nstatus: invalid\n---\nReplacement body",
+        )
+        .unwrap()
+        .into_document()
+        .unwrap();
+        assert!(!replacement.diagnostics.is_empty());
+        assert!(replacement.status.is_none());
+        engine.ingest(replacement).unwrap();
+        assert_eq!(engine.list_types().unwrap(), ["replacement"]);
+        let stats = engine.index_stats().unwrap();
+        assert_eq!(stats.logical.documents.total, 1.0);
+        assert_eq!(stats.logical.documents.strict, 0.0);
+        assert_eq!(stats.logical.documents.degraded, 1.0);
+        assert_eq!(stats.logical.statuses.unclassified, 1.0);
+    }
+
+    #[test]
+    fn normalized_single_preparation_matches_batch() {
+        for markdown in [
+            "---\ntype: note\ncustom: {nested: [1, two]}\n---\n# Heading\nBody",
+            "---\ntype: note\nstatus: invalid\n---\nBody",
+        ] {
+            let single =
+                prepare_normalized(normalize_identity("a/b.md").unwrap(), markdown).unwrap();
+            let batch = prepare_batch(vec![input("a/./b.md", markdown)]).unwrap();
+            assert_eq!(batch, vec![single]);
+        }
+        for markdown in ["no frontmatter", "---\ntitle: no type\n---\nBody"] {
+            let single =
+                prepare_normalized(normalize_identity("a/b.md").unwrap(), markdown).unwrap_err();
+            let batch = prepare_batch(vec![input("a/./b.md", markdown)]).unwrap_err();
+            assert_eq!(single.code, batch.code);
+            assert_eq!(single.path, batch.path);
+            assert_eq!(single.field, batch.field);
+            assert_eq!(single.diagnostics, batch.diagnostics);
+            assert!(single.cause.is_none());
         }
     }
 

@@ -27,6 +27,76 @@ fn fields(yaml: &str) -> okf_prepare_core::ProjectedFields {
 }
 
 #[test]
+fn preparation_retains_only_extensions_without_changing_identity() {
+    use okf_prepare_core::yaml::YamlOwned;
+
+    let Prepared::Accepted {
+        document_id,
+        fields,
+        body,
+        ..
+    } = prepare(
+        input(
+            "type: note\nid: yaml-id\n__proto__: {polluted: true}\ncustom: [null, false, 7, text]\nnegative_zero: -0.0\ninfinite: .inf",
+            "original body\n",
+        ),
+        "opaque/custom-identity",
+    )
+    else {
+        panic!("expected accepted document");
+    };
+    assert_eq!(document_id, "opaque/custom-identity");
+    assert_eq!(body, "original body\n");
+    assert_eq!(fields.extensions.len(), 5);
+    assert_eq!(
+        fields.extensions[0],
+        ("id".into(), YamlOwned::String("yaml-id".into()))
+    );
+    assert_eq!(
+        fields.extensions[1],
+        (
+            "__proto__".into(),
+            YamlOwned::Mapping(vec![("polluted".into(), YamlOwned::Boolean(true))])
+        )
+    );
+    assert_eq!(
+        fields.extensions[2],
+        (
+            "custom".into(),
+            YamlOwned::Sequence(vec![
+                YamlOwned::Null,
+                YamlOwned::Boolean(false),
+                YamlOwned::Integer(7),
+                YamlOwned::String("text".into())
+            ])
+        )
+    );
+    let YamlOwned::Float(zero) = fields.extensions[3].1 else {
+        panic!("expected float")
+    };
+    assert_eq!(zero, 0.0);
+    assert!(zero.is_sign_negative());
+    let YamlOwned::Float(infinite) = fields.extensions[4].1 else {
+        panic!("expected float")
+    };
+    assert_eq!(infinite, f64::INFINITY);
+}
+
+#[test]
+fn every_standard_frontmatter_key_is_excluded_from_extensions() {
+    let projected = fields(
+        "type: note\ntitle: title\ndescription: description\nresource: resource\ntags: []\nsources: []\nusage_window: null\ngenerated: null\nverified: []\nstatus: stable\nstale_after: null\nruntime: runtime\nparameters: []\ncomputation: computation\nexecutor: null\nattester: null\nextension: retained",
+    );
+    assert_eq!(
+        projected.extensions,
+        vec![(
+            "extension".into(),
+            okf_prepare_core::yaml::YamlOwned::String("retained".into())
+        )]
+    );
+}
+
+#[test]
 fn frontmatter_accepts_exact_line_endings_and_preserves_body() {
     let lf =
         parse_frontmatter("---\ntype: note\n---\nbody\r\nnext", "note.md").expect("LF frontmatter");

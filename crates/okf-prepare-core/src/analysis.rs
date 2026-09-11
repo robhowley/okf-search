@@ -42,6 +42,7 @@ pub enum Analysis {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Prepared {
     Fatal {
         diagnostics: Vec<Diagnostic>,
