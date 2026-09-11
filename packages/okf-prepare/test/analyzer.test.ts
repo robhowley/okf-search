@@ -88,6 +88,47 @@ describe("OKF document analysis", () => {
       .toEqual(expectedFields);
   });
 
+  it.each([
+    ["numeric", "1: value"],
+    ["boolean", "true: value"],
+    ["null", "null: value"],
+    ["sequence", "? [one, two]\n: value"],
+    ["mapping", "? {one: two}\n: value"],
+    ["nested", "extension: {1: value}"],
+    ["alias to number", "number: &number 1\n? *number\n: value"],
+    ["alias to sequence", "sequence: &sequence [one, two]\n? *sequence\n: value"],
+    ["alias to mapping", "mapping: &mapping {key: value}\n? *mapping\n: value"],
+  ])("rejects %s YAML mapping keys", (_name, metadata) => {
+    const source = input(`type: note\n${metadata}`);
+    expect(validateOkfDocument(source)).toEqual({
+      isValid: false,
+      isIndexable: false,
+      errors: [{
+        code: "ERR_OKF_PARSE",
+        path: "concept.md",
+        message: "Cannot parse OKF concept: concept.md",
+      }],
+    });
+    expect(() => prepareOkfDocument(source)).toThrow(
+      expect.objectContaining({
+        code: "ERR_OKF_PARSE",
+        path: "concept.md",
+      }),
+    );
+  });
+
+  it.each([
+    ["plain", "key: value", "key", "value"],
+    ["quoted", '"1": quoted', "1", "quoted"],
+    ["alias to string", "anchor: &key aliased\n? *key\n: value", "aliased", "value"],
+  ])("accepts %s YAML mapping keys", (_name, metadata, key, value) => {
+    const prepared = prepareOkfDocument(input(`type: note\n${metadata}`));
+    expect(prepared.conformance).toBe("strict");
+    if (prepared.conformance === "strict") {
+      expect(prepared.document.extensions).toMatchObject({ [key]: value });
+    }
+  });
+
   it("orders diagnostics by projector order rather than YAML order", () => {
     const result = validateOkfDocument(input(`
       attester: {}
