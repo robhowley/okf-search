@@ -1,5 +1,10 @@
 #![deny(clippy::all)]
 
+#[cfg(test)]
+mod filesystem;
+#[cfg(test)]
+mod preparation;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound;
 

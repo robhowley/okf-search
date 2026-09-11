@@ -16,6 +16,9 @@ parking_lot = "0.12"
 tantivy = "0.26.1"
 thiserror = "2"
 
+[dev-dependencies]
+okf-prepare-core = { path = "../../crates/okf-prepare-core" }
+
 [build-dependencies]
 napi-build = "2"
 

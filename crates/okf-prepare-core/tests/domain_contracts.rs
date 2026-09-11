@@ -371,6 +371,25 @@ fn trust_and_compliance_keep_invalid_present_values_unclassified() {
 
 #[test]
 fn timestamps_match_the_explicit_profile_and_round_fractional_milliseconds_up() {
+    for (value, expected) in [
+        ("1970-01-01T00:00:00Z", 0),
+        ("1969-12-31T23:59:59.999Z", -1),
+        ("1969-12-31T23:59:59.9991Z", 0),
+        ("1970-01-01T00:00:00+00:30", -1_800_000),
+        ("1970-01-01T00:00:00-00:30", 1_800_000),
+        ("2000-02-29T00:00:00Z", 951_782_400_000),
+        ("0000-01-01T00:00:00Z", -62_167_219_200_000),
+        ("9999-12-31T23:59:59.999Z", 253_402_300_799_999),
+    ] {
+        assert_eq!(parse_timestamp(value), Some(expected), "{value}");
+    }
+    for value in [
+        "1900-02-29T00:00:00Z",
+        "2024-04-31T00:00:00Z",
+        "2000-02-29T00:00:60Z",
+    ] {
+        assert_eq!(parse_timestamp(value), None, "{value}");
+    }
     let base = parse_timestamp("2026-08-24T10:00:00.123Z").expect("timestamp");
     assert_eq!(parse_timestamp("2026-08-24T10:00:00.1239Z"), Some(base + 1));
     assert_eq!(
