@@ -1,0 +1,17 @@
+[package]
+name = "okf-prepare-native"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3.12", default-features = false, features = ["napi8", "dyn-symbols"] }
+napi-derive = "3"
+okf-prepare-core = { path = "../../crates/okf-prepare-core" }
+
+[build-dependencies]
+napi-build = "2"

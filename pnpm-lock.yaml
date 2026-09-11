@@ -74,6 +74,12 @@ importers:
         specifier: ^3.0.3
         version: 3.0.3
 
+  packages/okf-prepare-native:
+    dependencies:
+      '@okf-internal/prepare':
+        specifier: workspace:*
+        version: link:../okf-prepare
+
   packages/okf-search-native:
     devDependencies:
       '@napi-rs/cli':
