@@ -8,9 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@okf-internal/prepare':
-        specifier: workspace:*
-        version: link:packages/okf-prepare
       '@rollup/plugin-node-resolve':
         specifier: ^16.0.3
         version: 16.0.3(rollup@4.63.1)
@@ -26,9 +23,6 @@ importers:
       rollup:
         specifier: ^4.63.1
         version: 4.63.1
-      rollup-plugin-dts:
-        specifier: ^6.5.1
-        version: 6.5.1(@typescript/typescript6@6.0.2)(rollup@4.63.1)(typescript@7.0.2)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -57,28 +51,6 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
-
-  packages/okf-prepare:
-    dependencies:
-      mdast-util-from-markdown:
-        specifier: 2.0.3
-        version: 2.0.3
-      yaml:
-        specifier: 2.9.0
-        version: 2.9.0
-    devDependencies:
-      '@types/mdast':
-        specifier: ^4.0.4
-        version: 4.0.4
-      '@types/unist':
-        specifier: ^3.0.3
-        version: 3.0.3
-
-  packages/okf-prepare-native:
-    dependencies:
-      '@okf-internal/prepare':
-        specifier: workspace:*
-        version: link:../okf-prepare
 
   packages/okf-search-native:
     devDependencies:

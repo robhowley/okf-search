@@ -35,8 +35,7 @@
     "build": "tsc -p tsconfig.json && pnpm run build:browser",
     "build:browser": "esbuild src/browser.ts --bundle --platform=browser --format=iife --global-name=OkfMiniSearch --target=es2022 --minify --outfile=dist/browser.min.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test:prepare-bundle": "node ../../scripts/check-private-bundling.mjs minisearch",
-    "test": "vitest run && pnpm run test:prepare-bundle"
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",

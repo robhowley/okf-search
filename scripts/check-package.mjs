@@ -80,8 +80,7 @@ const nativeRootTypeExports = [
 export function pnpmCommand() {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 }
-const PRIVATE_PACKAGE_NAME = "@okf-internal/prepare";
-const FORBIDDEN_PACKED_MARKERS = [PRIVATE_PACKAGE_NAME, "workspace:"];
+const FORBIDDEN_PACKED_MARKERS = ["@okf-internal/", "workspace:"];
 function currentNativeArtifact() {
   const suffix = nativeArtifactSuffixes[process.platform]?.[process.arch];
   assert.ok(
@@ -756,23 +755,6 @@ try {
 
 const nodeBundleConsumer = `import { openOkf } from "okf-minisearch";
 if (typeof openOkf !== "function") throw new Error("missing Node openOkf");
-`;
-
-const privateResolutionConsumer = `import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-
-const privatePackage = "@okf-internal/prepare";
-const require = createRequire(import.meta.url);
-assert.throws(
-  () => require.resolve(privatePackage),
-  (error) => error?.code === "MODULE_NOT_FOUND",
-  "require.resolve unexpectedly found the private package",
-);
-assert.throws(
-  () => import.meta.resolve(privatePackage),
-  (error) => error?.code === "ERR_MODULE_NOT_FOUND",
-  "import.meta.resolve unexpectedly found the private package",
-);
 `;
 
 const nativeRootTypeConsumer = `import {
@@ -1637,10 +1619,6 @@ async function prepareConsumerRoot(consumerRoot, manifest) {
     type: "module",
     packageManager: "pnpm@11.22.0",
   });
-  await writeFile(
-    join(consumerRoot, "private-resolution.mjs"),
-    privateResolutionConsumer,
-  );
 }
 
 async function prepareLibraryConsumer(temporaryRoot, libraryTarball) {
@@ -1834,13 +1812,6 @@ async function preparePiConsumer(
 }
 
 async function checkPrivatePackageBoundary(consumerRoot) {
-  await assert.rejects(
-    access(join(consumerRoot, "node_modules", PRIVATE_PACKAGE_NAME)),
-    (error) => error?.code === "ENOENT",
-    `${PRIVATE_PACKAGE_NAME} exists in ${basename(consumerRoot)} dependency tree`,
-  );
-
-  run(process.execPath, ["private-resolution.mjs"], { cwd: consumerRoot });
   const productionTree = run(
     pnpmCommand(),
     ["list", "--prod", "--depth", "Infinity", "--json"],

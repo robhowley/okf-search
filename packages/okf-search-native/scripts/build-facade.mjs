@@ -77,7 +77,7 @@ export async function buildNativeFacade({
     "index.d.ts",
   ]) {
     const contents = await readFile(join(outputDirectory, filename), "utf8");
-    if (contents.includes("@okf-internal/prepare") || contents.includes("workspace:")) {
+    if (contents.includes("@okf-internal/") || contents.includes("workspace:")) {
       throw new Error(`${filename} contains a private workspace reference`);
     }
   }
