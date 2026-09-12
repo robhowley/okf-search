@@ -141,7 +141,7 @@ test("native package exposes one complete build boundary and portable facade tes
   for (const filename of [
     "directory.test.ts",
     "lifecycle.test.ts",
-    "prepared-to-native.test.ts",
+    "raw-boundary.test.ts",
     "root-contract.test.ts",
     "search-options.test.ts",
   ]) {

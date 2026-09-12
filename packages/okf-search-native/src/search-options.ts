@@ -1,9 +1,3 @@
-import {
-  isOkfConformance,
-  isOkfStatus,
-  isOkfTrustTier,
-} from "@okf-internal/prepare";
-
 import type {
   SearchBoost as NativeSearchBoost,
   SearchOptions as NativeSearchOptions,
@@ -414,4 +408,14 @@ function validateFilterArray<T>(
   }
 
   return validated;
+}
+
+function isOkfConformance(value: unknown): value is "strict" | "degraded" {
+  return value === "strict" || value === "degraded";
+}
+function isOkfStatus(value: unknown): value is "draft" | "stable" | "deprecated" {
+  return value === "draft" || value === "stable" || value === "deprecated";
+}
+function isOkfTrustTier(value: unknown): value is "unverified" | "machine-confirmed" | "human-reviewed" {
+  return value === "unverified" || value === "machine-confirmed" || value === "human-reviewed";
 }

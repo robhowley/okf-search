@@ -9,6 +9,7 @@
     "types": []
   },
   "files": [
+    "src/index.ts",
     "tests/declaration-smoke.mts",
     "tests/declaration-smoke.cts"
   ]

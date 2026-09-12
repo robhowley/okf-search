@@ -8,7 +8,11 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+test-fixtures = []
+
 [dependencies]
+okf-prepare-core = { path = "../../crates/okf-prepare-core" }
 chrono = "0.4"
 napi = { version = "3.12", default-features = false, features = ["napi8", "chrono_date", "dyn-symbols"] }
 napi-derive = "3"

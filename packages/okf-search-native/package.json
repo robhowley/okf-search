@@ -47,7 +47,7 @@
     "test:rust": "cargo test --locked",
     "test:prepare-bundle": "node ../../scripts/check-private-bundling.mjs native",
     "typecheck": "pnpm run test:types",
-    "test": "pnpm run test:prepare-bundle && pnpm run test:types && pnpm run test:package-api && vitest run tests/directory.test.ts tests/lifecycle.test.ts tests/prepared-to-native.test.ts tests/root-contract.test.ts tests/search-options.test.ts --no-file-parallelism && pnpm run test:rust",
+    "test": "pnpm run test:prepare-bundle && pnpm run test:types && pnpm run test:package-api && vitest run tests/directory.test.ts tests/lifecycle.test.ts tests/raw-boundary.test.ts tests/root-contract.test.ts tests/search-options.test.ts --no-file-parallelism && pnpm run test:rust",
     "verify:release-artifacts": "node scripts/verify-release-artifacts.mjs"
   },
   "devDependencies": {

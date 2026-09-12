@@ -1,0 +1,1522 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-09T18:21:25.304Z",
+  "command": "pnpm --filter @okf-internal/prepare benchmark --root \"/Users/roberthowley/Documents/wiki-w-type\" --samples 20 --output \"test/evidence/phase-0-baseline.json\"",
+  "protocol": {
+    "warmupFreshProcesses": 1,
+    "measuredFreshProcesses": 20,
+    "filesystemWarmup": "full manifest fingerprint read before every child",
+    "garbageCollection": "--expose-gc before baseline and after dropping inputs/results",
+    "build": "TypeScript compiled JavaScript"
+  },
+  "corpus": {
+    "documents": 13692,
+    "bytes": 62463920,
+    "manifestFingerprint": "f57b9a3f8a54073b61f258b5bd29d65fd32576ee2a97e8618a1e7871b1ddab6e"
+  },
+  "host": {
+    "hostname": "Roberts-MacBook-Pro.local",
+    "platform": "darwin",
+    "release": "25.6.0",
+    "architecture": "arm64",
+    "node": "v24.15.0",
+    "cpuModel": "Apple M4 Pro",
+    "logicalCpuCount": 12,
+    "totalMemoryBytes": 51539607552,
+    "freeMemoryBytesAtReport": 857079808
+  },
+  "repository": {
+    "commit": "cbef6ead956a1a04f506482d67d333343eec49aa",
+    "dirty": true,
+    "changes": [
+      " M package.json",
+      " M packages/okf-prepare/package.json",
+      " M pnpm-lock.yaml",
+      "?? packages/okf-prepare/scripts/baseline.mjs",
+      "?? packages/okf-prepare/scripts/corpus-oracle.mjs",
+      "?? packages/okf-prepare/scripts/corpus-support.mjs",
+      "?? packages/okf-prepare/scripts/memory-retention.mjs",
+      "?? packages/okf-prepare/scripts/oracle-fixtures.mjs",
+      "?? packages/okf-prepare/scripts/oracle.mjs",
+      "?? packages/okf-prepare/scripts/typed-structural-encoder.mjs",
+      "?? packages/okf-prepare/test/evidence/corpus-oracle.json",
+      "?? packages/okf-prepare/test/evidence/phase-0-baseline.json",
+      "?? packages/okf-prepare/test/evidence/phase-0-retention.json",
+      "?? packages/okf-prepare/test/fixtures/filesystem/utf8-bom.md",
+      "?? packages/okf-prepare/test/fixtures/oracle-v1.json",
+      "?? packages/okf-prepare/test/fixtures/oracle-v1.typed",
+      "?? packages/okf-prepare/test/oracle.test.mjs"
+    ]
+  },
+  "artifactFingerprint": {
+    "sha256": "46f4022a8e9bbd58fb066054d53ad6299ba9373921a9151ced312f8713807e0a",
+    "runtimeFiles": [
+      {
+        "path": "packages/okf-prepare/dist/errors.js",
+        "bytes": 832,
+        "sha256": "f64ed5dd63abc02d3d46da795be804f3a9813e44481b9a8f5137cb4de08a50dd"
+      },
+      {
+        "path": "packages/okf-prepare/dist/identity.js",
+        "bytes": 1209,
+        "sha256": "b194a0fd423e8e0bdd2d6e55efeb668d608b4eebb94042beb61a94e3d9c18328"
+      },
+      {
+        "path": "packages/okf-prepare/dist/index.js",
+        "bytes": 389,
+        "sha256": "c5183cbe524dbce075bc2b13cd9494cbaa4b8b671a14075c0e84fe8fb98495f4"
+      },
+      {
+        "path": "packages/okf-prepare/dist/node.js",
+        "bytes": 2969,
+        "sha256": "41ae71c446525c75292b8a80a8c57b0bf5bc7349bf8d9c2be687c6bca432db6d"
+      },
+      {
+        "path": "packages/okf-prepare/dist/prepare.js",
+        "bytes": 28630,
+        "sha256": "81424e6cb34415283ae292bd77c61bee1a1f6d9e6128e8b8b74cfbb1470a8d99"
+      },
+      {
+        "path": "packages/okf-prepare/dist/types.js",
+        "bytes": 11,
+        "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+      },
+      {
+        "path": "packages/okf-prepare/dist/vocabulary.js",
+        "bytes": 541,
+        "sha256": "1e99c5a64fd03896a00fdbd2e87a4fff203cff3c5173b2ec332a9189ea9c2d96"
+      }
+    ],
+    "dependencyManifest": {
+      "path": "packages/okf-prepare/package.json",
+      "bytes": 1061,
+      "sha256": "2dd9405e23fc08a4fea8e37a9c3540f301210ce28a6b121c519f5b27ab6e765d",
+      "dependencies": {
+        "mdast-util-from-markdown": "2.0.3",
+        "yaml": "2.9.0"
+      }
+    },
+    "dependencyLock": {
+      "path": "pnpm-lock.yaml",
+      "bytes": 185577,
+      "sha256": "2b4a29ea289f5d0a001b36f28de6dee48a01dfa30dc0c6fc695e23a43be9cfe8"
+    }
+  },
+  "warmup": {
+    "read": {
+      "wallMs": 1167.868,
+      "cpuMs": 1228.513
+    },
+    "prepare": {
+      "wallMs": 12712.548,
+      "cpuMs": 14264.641
+    },
+    "total": {
+      "wallMs": 13880.475,
+      "cpuMs": 15493.249
+    },
+    "inventory": {
+      "documents": 13692,
+      "sections": 109990,
+      "degradedDocuments": 1248
+    },
+    "memory": {
+      "before": {
+        "rss": 61030400,
+        "heapTotal": 17022976,
+        "heapUsed": 7006128,
+        "external": 2164358,
+        "arrayBuffers": 28907
+      },
+      "afterRead": {
+        "rss": 303071232,
+        "heapTotal": 244744192,
+        "heapUsed": 153628472,
+        "external": 9254985,
+        "arrayBuffers": 7119530
+      },
+      "afterPrepare": {
+        "rss": 667484160,
+        "heapTotal": 578994176,
+        "heapUsed": 448662032,
+        "external": 2164378,
+        "arrayBuffers": 28923
+      },
+      "afterDrop": {
+        "rss": 663617536,
+        "heapTotal": 270172160,
+        "heapUsed": 132718784,
+        "external": 2164378,
+        "arrayBuffers": 28923
+      },
+      "retainedGrowth": {
+        "rss": 602587136,
+        "heapTotal": 253149184,
+        "heapUsed": 125712656,
+        "external": 20,
+        "arrayBuffers": 16
+      },
+      "maxRssBytes": 667533312
+    }
+  },
+  "summary": {
+    "read": {
+      "wallMs": {
+        "min": 806.024,
+        "p50": 846.362,
+        "p95": 984.461,
+        "max": 1015.706
+      },
+      "cpuMs": {
+        "min": 930.819,
+        "p50": 968.773,
+        "p95": 1130.891,
+        "max": 1143.316
+      },
+      "documentsPerSecondAtP50": 16177.475,
+      "mibPerSecondAtP50": 70.384
+    },
+    "prepare": {
+      "wallMs": {
+        "min": 12111.431,
+        "p50": 12224.525,
+        "p95": 12516.333,
+        "max": 12521.387
+      },
+      "cpuMs": {
+        "min": 13606.692,
+        "p50": 13794.132,
+        "p95": 14120.292,
+        "max": 14185.958
+      },
+      "documentsPerSecondAtP50": 1120.044,
+      "mibPerSecondAtP50": 4.873
+    },
+    "total": {
+      "wallMs": {
+        "min": 12963.805,
+        "p50": 13106.399,
+        "p95": 13405.439,
+        "max": 13425.722
+      },
+      "cpuMs": {
+        "min": 14575.354,
+        "p50": 14786.063,
+        "p95": 15147.008,
+        "max": 15151.041
+      },
+      "documentsPerSecondAtP50": 1044.681,
+      "mibPerSecondAtP50": 4.545
+    },
+    "memoryBytes": {
+      "before": {
+        "rss": {
+          "min": 60571648,
+          "p50": 60981248,
+          "p95": 61292544,
+          "max": 61358080
+        },
+        "heapTotal": {
+          "min": 16760832,
+          "p50": 17285120,
+          "p95": 17547264,
+          "max": 17547264
+        },
+        "heapUsed": {
+          "min": 7004656,
+          "p50": 7005928,
+          "p95": 7006320,
+          "max": 7006368
+        },
+        "external": {
+          "min": 2164358,
+          "p50": 2164358,
+          "p95": 2164358,
+          "max": 2164358
+        },
+        "arrayBuffers": {
+          "min": 28907,
+          "p50": 28907,
+          "p95": 28907,
+          "max": 28907
+        }
+      },
+      "afterRead": {
+        "rss": {
+          "min": 302612480,
+          "p50": 312459264,
+          "p95": 315719680,
+          "max": 316063744
+        },
+        "heapTotal": {
+          "min": 243957760,
+          "p50": 252870656,
+          "p95": 255754240,
+          "max": 256278528
+        },
+        "heapUsed": {
+          "min": 142814040,
+          "p50": 147002680,
+          "p95": 154618304,
+          "max": 156101200
+        },
+        "external": {
+          "min": 5419238,
+          "p50": 6910958,
+          "p95": 9908111,
+          "max": 10208123
+        },
+        "arrayBuffers": {
+          "min": 3283783,
+          "p50": 4775503,
+          "p95": 7772656,
+          "max": 8072668
+        }
+      },
+      "afterPrepare": {
+        "rss": {
+          "min": 587137024,
+          "p50": 637386752,
+          "p95": 709132288,
+          "max": 719355904
+        },
+        "heapTotal": {
+          "min": 488439808,
+          "p50": 543227904,
+          "p95": 610795520,
+          "max": 622133248
+        },
+        "heapUsed": {
+          "min": 318126016,
+          "p50": 364737824,
+          "p95": 484094176,
+          "max": 539415688
+        },
+        "external": {
+          "min": 2164378,
+          "p50": 2164378,
+          "p95": 2164378,
+          "max": 2164378
+        },
+        "arrayBuffers": {
+          "min": 28923,
+          "p50": 28923,
+          "p95": 28923,
+          "max": 28923
+        }
+      },
+      "afterDrop": {
+        "rss": {
+          "min": 583892992,
+          "p50": 635469824,
+          "p95": 706592768,
+          "max": 716668928
+        },
+        "heapTotal": {
+          "min": 269385728,
+          "p50": 270434304,
+          "p95": 272007168,
+          "max": 272269312
+        },
+        "heapUsed": {
+          "min": 131770712,
+          "p50": 132721192,
+          "p95": 132739800,
+          "max": 132743800
+        },
+        "external": {
+          "min": 2162990,
+          "p50": 2164378,
+          "p95": 2164378,
+          "max": 2164378
+        },
+        "arrayBuffers": {
+          "min": 28923,
+          "p50": 28923,
+          "p95": 28923,
+          "max": 28923
+        }
+      },
+      "retainedGrowth": {
+        "rss": {
+          "min": 522698752,
+          "p50": 574439424,
+          "p95": 645758976,
+          "max": 655933440
+        },
+        "heapTotal": {
+          "min": 252362752,
+          "p50": 253411328,
+          "p95": 254722048,
+          "max": 254984192
+        },
+        "heapUsed": {
+          "min": 124764720,
+          "p50": 125715080,
+          "p95": 125734072,
+          "max": 125737792
+        },
+        "external": {
+          "min": -1368,
+          "p50": 20,
+          "p95": 20,
+          "max": 20
+        },
+        "arrayBuffers": {
+          "min": 16,
+          "p50": 16,
+          "p95": 16,
+          "max": 16
+        }
+      },
+      "maxRssBytes": {
+        "min": 589119488,
+        "p50": 637894656,
+        "p95": 709181440,
+        "max": 719650816
+      }
+    }
+  },
+  "samples": [
+    {
+      "read": {
+        "wallMs": 981.834,
+        "cpuMs": 1130.891
+      },
+      "prepare": {
+        "wallMs": 12382.462,
+        "cpuMs": 13972.429
+      },
+      "total": {
+        "wallMs": 13364.347,
+        "cpuMs": 15103.403
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61358080,
+          "heapTotal": 17285120,
+          "heapUsed": 7004824,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 303824896,
+          "heapTotal": 245006336,
+          "heapUsed": 154555568,
+          "external": 9908111,
+          "arrayBuffers": 7772656
+        },
+        "afterPrepare": {
+          "rss": 657506304,
+          "heapTotal": 562102272,
+          "heapUsed": 318126016,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 654475264,
+          "heapTotal": 270434304,
+          "heapUsed": 132719352,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 593117184,
+          "heapTotal": 253149184,
+          "heapUsed": 125714528,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 657719296
+      }
+    },
+    {
+      "read": {
+        "wallMs": 841.436,
+        "cpuMs": 965.006
+      },
+      "prepare": {
+        "wallMs": 12516.333,
+        "cpuMs": 14185.958
+      },
+      "total": {
+        "wallMs": 13357.814,
+        "cpuMs": 15151.041
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60997632,
+          "heapTotal": 17285120,
+          "heapUsed": 7005608,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 313901056,
+          "heapTotal": 253394944,
+          "heapUsed": 146197584,
+          "external": 6557317,
+          "arrayBuffers": 4421862
+        },
+        "afterPrepare": {
+          "rss": 604340224,
+          "heapTotal": 507576320,
+          "heapUsed": 407525592,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 601505792,
+          "heapTotal": 269647872,
+          "heapUsed": 132723456,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 540508160,
+          "heapTotal": 252362752,
+          "heapUsed": 125717848,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 605110272
+      }
+    },
+    {
+      "read": {
+        "wallMs": 982.594,
+        "cpuMs": 1115.724
+      },
+      "prepare": {
+        "wallMs": 12422.803,
+        "cpuMs": 13991.718
+      },
+      "total": {
+        "wallMs": 13405.439,
+        "cpuMs": 15107.517
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61079552,
+          "heapTotal": 17285120,
+          "heapUsed": 7006008,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 309739520,
+          "heapTotal": 251035648,
+          "heapUsed": 153357328,
+          "external": 9309996,
+          "arrayBuffers": 7174541
+        },
+        "afterPrepare": {
+          "rss": 623345664,
+          "heapTotal": 495779840,
+          "heapUsed": 361325160,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 620150784,
+          "heapTotal": 270958592,
+          "heapUsed": 132743800,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 559071232,
+          "heapTotal": 253673472,
+          "heapUsed": 125737792,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 623738880
+      }
+    },
+    {
+      "read": {
+        "wallMs": 1015.706,
+        "cpuMs": 1055.763
+      },
+      "prepare": {
+        "wallMs": 12201.687,
+        "cpuMs": 13833.705
+      },
+      "total": {
+        "wallMs": 13217.587,
+        "cpuMs": 14889.6
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61292544,
+          "heapTotal": 17285120,
+          "heapUsed": 7005416,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 302956544,
+          "heapTotal": 245268480,
+          "heapUsed": 153290432,
+          "external": 9380902,
+          "arrayBuffers": 7245447
+        },
+        "afterPrepare": {
+          "rss": 662175744,
+          "heapTotal": 568655872,
+          "heapUsed": 380088504,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 659750912,
+          "heapTotal": 272007168,
+          "heapUsed": 132723824,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 598458368,
+          "heapTotal": 254722048,
+          "heapUsed": 125718408,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 662290432
+      }
+    },
+    {
+      "read": {
+        "wallMs": 835.825,
+        "cpuMs": 968.773
+      },
+      "prepare": {
+        "wallMs": 12254.648,
+        "cpuMs": 13877.35
+      },
+      "total": {
+        "wallMs": 13090.519,
+        "cpuMs": 14846.199
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61014016,
+          "heapTotal": 17022976,
+          "heapUsed": 7005928,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 313491456,
+          "heapTotal": 252870656,
+          "heapUsed": 147139576,
+          "external": 6999912,
+          "arrayBuffers": 4864457
+        },
+        "afterPrepare": {
+          "rss": 636649472,
+          "heapTotal": 539492352,
+          "heapUsed": 376786272,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 633552896,
+          "heapTotal": 269647872,
+          "heapUsed": 132718504,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 572538880,
+          "heapTotal": 252624896,
+          "heapUsed": 125712576,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 637632512
+      }
+    },
+    {
+      "read": {
+        "wallMs": 838.937,
+        "cpuMs": 957.066
+      },
+      "prepare": {
+        "wallMs": 12333.3,
+        "cpuMs": 13662.049
+      },
+      "total": {
+        "wallMs": 13172.284,
+        "cpuMs": 14619.198
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60702720,
+          "heapTotal": 17022976,
+          "heapUsed": 7006000,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 314064896,
+          "heapTotal": 254967808,
+          "heapUsed": 143423008,
+          "external": 5515527,
+          "arrayBuffers": 3380072
+        },
+        "afterPrepare": {
+          "rss": 639320064,
+          "heapTotal": 543490048,
+          "heapUsed": 412988000,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 636600320,
+          "heapTotal": 270434304,
+          "heapUsed": 132715192,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 575897600,
+          "heapTotal": 253411328,
+          "heapUsed": 125709192,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 639565824
+      }
+    },
+    {
+      "read": {
+        "wallMs": 846.362,
+        "cpuMs": 968.581
+      },
+      "prepare": {
+        "wallMs": 12128.447,
+        "cpuMs": 13606.692
+      },
+      "total": {
+        "wallMs": 12974.856,
+        "cpuMs": 14575.354
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60571648,
+          "heapTotal": 16760832,
+          "heapUsed": 7004656,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 314982400,
+          "heapTotal": 255492096,
+          "heapUsed": 143986088,
+          "external": 5847008,
+          "arrayBuffers": 3711553
+        },
+        "afterPrepare": {
+          "rss": 667074560,
+          "heapTotal": 570933248,
+          "heapUsed": 484094176,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 663093248,
+          "heapTotal": 270172160,
+          "heapUsed": 132716808,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 602521600,
+          "heapTotal": 253411328,
+          "heapUsed": 125712152,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 667074560
+      }
+    },
+    {
+      "read": {
+        "wallMs": 852.333,
+        "cpuMs": 973.926
+      },
+      "prepare": {
+        "wallMs": 12111.431,
+        "cpuMs": 13680.93
+      },
+      "total": {
+        "wallMs": 12963.805,
+        "cpuMs": 14654.925
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60588032,
+          "heapTotal": 17285120,
+          "heapUsed": 7006112,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 302792704,
+          "heapTotal": 245530624,
+          "heapUsed": 153912880,
+          "external": 9660246,
+          "arrayBuffers": 7524791
+        },
+        "afterPrepare": {
+          "rss": 636747776,
+          "heapTotal": 543227904,
+          "heapUsed": 327222728,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 634273792,
+          "heapTotal": 270958592,
+          "heapUsed": 132721192,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 573685760,
+          "heapTotal": 253673472,
+          "heapUsed": 125715080,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 637239296
+      }
+    },
+    {
+      "read": {
+        "wallMs": 810.682,
+        "cpuMs": 930.819
+      },
+      "prepare": {
+        "wallMs": 12153.835,
+        "cpuMs": 13741.249
+      },
+      "total": {
+        "wallMs": 12964.567,
+        "cpuMs": 14672.148
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60981248,
+          "heapTotal": 17285120,
+          "heapUsed": 7006000,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 303546368,
+          "heapTotal": 245530624,
+          "heapUsed": 154618304,
+          "external": 9400455,
+          "arrayBuffers": 7265000
+        },
+        "afterPrepare": {
+          "rss": 613367808,
+          "heapTotal": 514654208,
+          "heapUsed": 329741024,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 610516992,
+          "heapTotal": 271220736,
+          "heapUsed": 132718200,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 549535744,
+          "heapTotal": 253935616,
+          "heapUsed": 125712200,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 614645760
+      }
+    },
+    {
+      "read": {
+        "wallMs": 833.263,
+        "cpuMs": 954.853
+      },
+      "prepare": {
+        "wallMs": 12273.088,
+        "cpuMs": 13744.297
+      },
+      "total": {
+        "wallMs": 13106.399,
+        "cpuMs": 14699.23
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60833792,
+          "heapTotal": 17285120,
+          "heapUsed": 7005384,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 313753600,
+          "heapTotal": 254705664,
+          "heapUsed": 145825992,
+          "external": 6385708,
+          "arrayBuffers": 4250253
+        },
+        "afterPrepare": {
+          "rss": 709132288,
+          "heapTotal": 610795520,
+          "heapUsed": 539415688,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 706592768,
+          "heapTotal": 269910016,
+          "heapUsed": 132713744,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 645758976,
+          "heapTotal": 252624896,
+          "heapUsed": 125708360,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 709181440
+      }
+    },
+    {
+      "read": {
+        "wallMs": 806.024,
+        "cpuMs": 966.637
+      },
+      "prepare": {
+        "wallMs": 12274.468,
+        "cpuMs": 13951.357
+      },
+      "total": {
+        "wallMs": 13080.541,
+        "cpuMs": 14918.074
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61194240,
+          "heapTotal": 17285120,
+          "heapUsed": 7005992,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 314785792,
+          "heapTotal": 254181376,
+          "heapUsed": 146479432,
+          "external": 6771430,
+          "arrayBuffers": 4635975
+        },
+        "afterPrepare": {
+          "rss": 587137024,
+          "heapTotal": 488439808,
+          "heapUsed": 333713232,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 583892992,
+          "heapTotal": 269647872,
+          "heapUsed": 131770712,
+          "external": 2162990,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 522698752,
+          "heapTotal": 252362752,
+          "heapUsed": 124764720,
+          "external": -1368,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 589119488
+      }
+    },
+    {
+      "read": {
+        "wallMs": 840.63,
+        "cpuMs": 966.403
+      },
+      "prepare": {
+        "wallMs": 12151.574,
+        "cpuMs": 13684.421
+      },
+      "total": {
+        "wallMs": 12992.253,
+        "cpuMs": 14650.91
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60735488,
+          "heapTotal": 17285120,
+          "heapUsed": 7006056,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 312459264,
+          "heapTotal": 254181376,
+          "heapUsed": 147002680,
+          "external": 6910958,
+          "arrayBuffers": 4775503
+        },
+        "afterPrepare": {
+          "rss": 719355904,
+          "heapTotal": 622133248,
+          "heapUsed": 372050648,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 716668928,
+          "heapTotal": 271220736,
+          "heapUsed": 132716400,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 655933440,
+          "heapTotal": 253935616,
+          "heapUsed": 125710344,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 719650816
+      }
+    },
+    {
+      "read": {
+        "wallMs": 830.534,
+        "cpuMs": 947.639
+      },
+      "prepare": {
+        "wallMs": 12200.267,
+        "cpuMs": 13794.132
+      },
+      "total": {
+        "wallMs": 13030.85,
+        "cpuMs": 14741.85
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60932096,
+          "heapTotal": 17022976,
+          "heapUsed": 7005576,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 315195392,
+          "heapTotal": 255492096,
+          "heapUsed": 143411368,
+          "external": 5596783,
+          "arrayBuffers": 3461328
+        },
+        "afterPrepare": {
+          "rss": 599539712,
+          "heapTotal": 504168448,
+          "heapUsed": 331388912,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 596279296,
+          "heapTotal": 270172160,
+          "heapUsed": 132723328,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 535347200,
+          "heapTotal": 253149184,
+          "heapUsed": 125717752,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 600326144
+      }
+    },
+    {
+      "read": {
+        "wallMs": 904.287,
+        "cpuMs": 1026.637
+      },
+      "prepare": {
+        "wallMs": 12521.387,
+        "cpuMs": 14120.292
+      },
+      "total": {
+        "wallMs": 13425.722,
+        "cpuMs": 15147.008
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61095936,
+          "heapTotal": 17022976,
+          "heapUsed": 7005944,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 304431104,
+          "heapTotal": 245792768,
+          "heapUsed": 153369248,
+          "external": 9360579,
+          "arrayBuffers": 7225124
+        },
+        "afterPrepare": {
+          "rss": 656326656,
+          "heapTotal": 559742976,
+          "heapUsed": 320545400,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 654000128,
+          "heapTotal": 271220736,
+          "heapUsed": 132721752,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 592904192,
+          "heapTotal": 254197760,
+          "heapUsed": 125715808,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 656605184
+      }
+    },
+    {
+      "read": {
+        "wallMs": 857.511,
+        "cpuMs": 982.99
+      },
+      "prepare": {
+        "wallMs": 12224.525,
+        "cpuMs": 13851.521
+      },
+      "total": {
+        "wallMs": 13082.079,
+        "cpuMs": 14834.582
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61046784,
+          "heapTotal": 17547264,
+          "heapUsed": 7006040,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 315064320,
+          "heapTotal": 255229952,
+          "heapUsed": 144958568,
+          "external": 6020536,
+          "arrayBuffers": 3885081
+        },
+        "afterPrepare": {
+          "rss": 593395712,
+          "heapTotal": 496828416,
+          "heapUsed": 405903272,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 590512128,
+          "heapTotal": 269910016,
+          "heapUsed": 132722488,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 529465344,
+          "heapTotal": 252362752,
+          "heapUsed": 125716448,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 594362368
+      }
+    },
+    {
+      "read": {
+        "wallMs": 836.942,
+        "cpuMs": 961.533
+      },
+      "prepare": {
+        "wallMs": 12174.315,
+        "cpuMs": 13738.218
+      },
+      "total": {
+        "wallMs": 13011.299,
+        "cpuMs": 14699.822
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60981248,
+          "heapTotal": 17547264,
+          "heapUsed": 7006320,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 316063744,
+          "heapTotal": 256278528,
+          "heapUsed": 143711680,
+          "external": 5670320,
+          "arrayBuffers": 3534865
+        },
+        "afterPrepare": {
+          "rss": 654311424,
+          "heapTotal": 550305792,
+          "heapUsed": 364737824,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 651853824,
+          "heapTotal": 271482880,
+          "heapUsed": 132724840,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 590872576,
+          "heapTotal": 253935616,
+          "heapUsed": 125718520,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 655130624
+      }
+    },
+    {
+      "read": {
+        "wallMs": 927.376,
+        "cpuMs": 1070.147
+      },
+      "prepare": {
+        "wallMs": 12315.49,
+        "cpuMs": 13933.178
+      },
+      "total": {
+        "wallMs": 13242.909,
+        "cpuMs": 15003.396
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60948480,
+          "heapTotal": 17285120,
+          "heapUsed": 7006368,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 302612480,
+          "heapTotal": 243957760,
+          "heapUsed": 156101200,
+          "external": 10208123,
+          "arrayBuffers": 8072668
+        },
+        "afterPrepare": {
+          "rss": 680706048,
+          "heapTotal": 584876032,
+          "heapUsed": 449434416,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 677265408,
+          "heapTotal": 271220736,
+          "heapUsed": 132732976,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 616316928,
+          "heapTotal": 253935616,
+          "heapUsed": 125726608,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 680755200
+      }
+    },
+    {
+      "read": {
+        "wallMs": 916.509,
+        "cpuMs": 1043.717
+      },
+      "prepare": {
+        "wallMs": 12421.879,
+        "cpuMs": 13985.848
+      },
+      "total": {
+        "wallMs": 13338.428,
+        "cpuMs": 15029.629
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 61030400,
+          "heapTotal": 17285120,
+          "heapUsed": 7005352,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 304349184,
+          "heapTotal": 245792768,
+          "heapUsed": 153417152,
+          "external": 9155378,
+          "arrayBuffers": 7019923
+        },
+        "afterPrepare": {
+          "rss": 637386752,
+          "heapTotal": 541392896,
+          "heapUsed": 322226592,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 635469824,
+          "heapTotal": 272269312,
+          "heapUsed": 132733464,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 574439424,
+          "heapTotal": 254984192,
+          "heapUsed": 125728112,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 637894656
+      }
+    },
+    {
+      "read": {
+        "wallMs": 926.769,
+        "cpuMs": 1061.791
+      },
+      "prepare": {
+        "wallMs": 12198.305,
+        "cpuMs": 13678.487
+      },
+      "total": {
+        "wallMs": 13125.119,
+        "cpuMs": 14740.361
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60768256,
+          "heapTotal": 16760832,
+          "heapUsed": 7005576,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 315719680,
+          "heapTotal": 255754240,
+          "heapUsed": 142814040,
+          "external": 5419238,
+          "arrayBuffers": 3283783
+        },
+        "afterPrepare": {
+          "rss": 647626752,
+          "heapTotal": 550551552,
+          "heapUsed": 420382072,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 644071424,
+          "heapTotal": 270172160,
+          "heapUsed": 132716944,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 583303168,
+          "heapTotal": 253411328,
+          "heapUsed": 125711368,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 647675904
+      }
+    },
+    {
+      "read": {
+        "wallMs": 984.461,
+        "cpuMs": 1143.316
+      },
+      "prepare": {
+        "wallMs": 12152.226,
+        "cpuMs": 13642.659
+      },
+      "total": {
+        "wallMs": 13136.741,
+        "cpuMs": 14786.063
+      },
+      "inventory": {
+        "documents": 13692,
+        "sections": 109990,
+        "degradedDocuments": 1248
+      },
+      "memory": {
+        "before": {
+          "rss": 60915712,
+          "heapTotal": 17022976,
+          "heapUsed": 7005728,
+          "external": 2164358,
+          "arrayBuffers": 28907
+        },
+        "afterRead": {
+          "rss": 308756480,
+          "heapTotal": 250511360,
+          "heapUsed": 153420440,
+          "external": 9198981,
+          "arrayBuffers": 7063526
+        },
+        "afterPrepare": {
+          "rss": 620920832,
+          "heapTotal": 513605632,
+          "heapUsed": 353837128,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "afterDrop": {
+          "rss": 618315776,
+          "heapTotal": 269385728,
+          "heapUsed": 132739800,
+          "external": 2164378,
+          "arrayBuffers": 28923
+        },
+        "retainedGrowth": {
+          "rss": 557400064,
+          "heapTotal": 252362752,
+          "heapUsed": 125734072,
+          "external": 20,
+          "arrayBuffers": 16
+        },
+        "maxRssBytes": 622739456
+      }
+    }
+  ]
+}

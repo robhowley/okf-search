@@ -1,0 +1,4947 @@
+{
+  "schemaVersion": 10,
+  "dependencies": {
+    "yaml": "2.9.0"
+  },
+  "yaml": [
+    {
+      "id": "yaml-1.2-values",
+      "source": "type: note\nscalars: [null, true, false, 0, -0, 0o17, 0x10, 1e3, .nan, .inf, -.inf, 2026-08-24]\nquoted: [\"null\", 'true', \"\\uD800\", \"\\uDC00\", \"\\uD800\\uDC00\"]\nnested: {plain: value, list: [one, two]}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                99,
+                97,
+                108,
+                97,
+                114,
+                115
+              ],
+              [
+                "array",
+                1,
+                12,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "null"
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "boolean",
+                      true
+                    ]
+                  ],
+                  [
+                    [
+                      50
+                    ],
+                    [
+                      "boolean",
+                      false
+                    ]
+                  ],
+                  [
+                    [
+                      51
+                    ],
+                    [
+                      "number",
+                      "0000000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      52
+                    ],
+                    [
+                      "number",
+                      "8000000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      53
+                    ],
+                    [
+                      "number",
+                      "402e000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      54
+                    ],
+                    [
+                      "number",
+                      "4030000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      55
+                    ],
+                    [
+                      "number",
+                      "408f400000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      56
+                    ],
+                    [
+                      "number",
+                      "7ff8000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      57
+                    ],
+                    [
+                      "number",
+                      "7ff0000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      48
+                    ],
+                    [
+                      "number",
+                      "fff0000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      49
+                    ],
+                    [
+                      "string",
+                      [
+                        50,
+                        48,
+                        50,
+                        54,
+                        45,
+                        48,
+                        56,
+                        45,
+                        50,
+                        52
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                113,
+                117,
+                111,
+                116,
+                101,
+                100
+              ],
+              [
+                "array",
+                2,
+                5,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "string",
+                      [
+                        110,
+                        117,
+                        108,
+                        108
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "string",
+                      [
+                        116,
+                        114,
+                        117,
+                        101
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      50
+                    ],
+                    [
+                      "string",
+                      [
+                        55296
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      51
+                    ],
+                    [
+                      "string",
+                      [
+                        56320
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      52
+                    ],
+                    [
+                      "string",
+                      [
+                        55296,
+                        56320
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                110,
+                101,
+                115,
+                116,
+                101,
+                100
+              ],
+              [
+                "object",
+                3,
+                "object-prototype",
+                [
+                  [
+                    [
+                      112,
+                      108,
+                      97,
+                      105,
+                      110
+                    ],
+                    [
+                      "string",
+                      [
+                        118,
+                        97,
+                        108,
+                        117,
+                        101
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      108,
+                      105,
+                      115,
+                      116
+                    ],
+                    [
+                      "array",
+                      4,
+                      2,
+                      [
+                        [
+                          [
+                            48
+                          ],
+                          [
+                            "string",
+                            [
+                              111,
+                              110,
+                              101
+                            ]
+                          ]
+                        ],
+                        [
+                          [
+                            49
+                          ],
+                          [
+                            "string",
+                            [
+                              116,
+                              119,
+                              111
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "leading-bom-before-non-string-key",
+      "sourceUnits": [
+        65279,
+        49,
+        58,
+        32,
+        118,
+        97,
+        108,
+        117,
+        101
+      ],
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "double-leading-bom-removes-only-the-first",
+      "sourceUnits": [
+        65279,
+        65279,
+        49,
+        58,
+        32,
+        118,
+        97,
+        108,
+        117,
+        101
+      ],
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                65279,
+                49
+              ],
+              [
+                "string",
+                [
+                  118,
+                  97,
+                  108,
+                  117,
+                  101
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "non-leading-bom-remains-a-string-key",
+      "sourceUnits": [
+        116,
+        121,
+        112,
+        101,
+        58,
+        32,
+        110,
+        111,
+        116,
+        101,
+        10,
+        65279,
+        49,
+        58,
+        32,
+        118,
+        97,
+        108,
+        117,
+        101
+      ],
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                65279,
+                49
+              ],
+              [
+                "string",
+                [
+                  118,
+                  97,
+                  108,
+                  117,
+                  101
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "aliases-and-cycles",
+      "source": "type: note\nfirst: &shared {value: shared}\nsecond: *shared\ncycle: &cycle {self: *cycle}\nsequence: &sequence [*shared, *shared]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "object",
+                1,
+                "object-prototype",
+                [
+                  [
+                    [
+                      118,
+                      97,
+                      108,
+                      117,
+                      101
+                    ],
+                    [
+                      "string",
+                      [
+                        115,
+                        104,
+                        97,
+                        114,
+                        101,
+                        100
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ],
+              [
+                "reference",
+                1
+              ]
+            ],
+            [
+              [
+                99,
+                121,
+                99,
+                108,
+                101
+              ],
+              [
+                "object",
+                2,
+                "object-prototype",
+                [
+                  [
+                    [
+                      115,
+                      101,
+                      108,
+                      102
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                113,
+                117,
+                101,
+                110,
+                99,
+                101
+              ],
+              [
+                "array",
+                3,
+                2,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "reference",
+                      1
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "reference",
+                      1
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tagged-values",
+      "source": "type: note\ndate: !!timestamp 2026-08-24\nmap: !!map {one: 1}\nordered: !!omap [{first: one}, {second: two}]\npairs: !!pairs [{first: one}, {second: two}]\nset: !!set {first: null, second: null}\nbinary: !!binary SGVsbG8=\nunknownScalar: !application/custom value\nunknownSequence: !application/custom [one, two]\nunknownMapping: !application/custom {one: two}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                100,
+                97,
+                116,
+                101
+              ],
+              [
+                "date",
+                1,
+                "427a031111c00000"
+              ]
+            ],
+            [
+              [
+                109,
+                97,
+                112
+              ],
+              [
+                "object",
+                2,
+                "object-prototype",
+                [
+                  [
+                    [
+                      111,
+                      110,
+                      101
+                    ],
+                    [
+                      "number",
+                      "3ff0000000000000"
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                111,
+                114,
+                100,
+                101,
+                114,
+                101,
+                100
+              ],
+              [
+                "map",
+                3,
+                [
+                  [
+                    [
+                      "string",
+                      [
+                        102,
+                        105,
+                        114,
+                        115,
+                        116
+                      ]
+                    ],
+                    [
+                      "string",
+                      [
+                        111,
+                        110,
+                        101
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      "string",
+                      [
+                        115,
+                        101,
+                        99,
+                        111,
+                        110,
+                        100
+                      ]
+                    ],
+                    [
+                      "string",
+                      [
+                        116,
+                        119,
+                        111
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                112,
+                97,
+                105,
+                114,
+                115
+              ],
+              [
+                "array",
+                4,
+                2,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "object",
+                      5,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            102,
+                            105,
+                            114,
+                            115,
+                            116
+                          ],
+                          [
+                            "string",
+                            [
+                              111,
+                              110,
+                              101
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "object",
+                      6,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            115,
+                            101,
+                            99,
+                            111,
+                            110,
+                            100
+                          ],
+                          [
+                            "string",
+                            [
+                              116,
+                              119,
+                              111
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                116
+              ],
+              [
+                "set",
+                7,
+                [
+                  [
+                    "string",
+                    [
+                      102,
+                      105,
+                      114,
+                      115,
+                      116
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      115,
+                      101,
+                      99,
+                      111,
+                      110,
+                      100
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                98,
+                105,
+                110,
+                97,
+                114,
+                121
+              ],
+              [
+                "array-buffer-view",
+                8,
+                "Buffer",
+                "SGVsbG8="
+              ]
+            ],
+            [
+              [
+                117,
+                110,
+                107,
+                110,
+                111,
+                119,
+                110,
+                83,
+                99,
+                97,
+                108,
+                97,
+                114
+              ],
+              [
+                "string",
+                [
+                  118,
+                  97,
+                  108,
+                  117,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                117,
+                110,
+                107,
+                110,
+                111,
+                119,
+                110,
+                83,
+                101,
+                113,
+                117,
+                101,
+                110,
+                99,
+                101
+              ],
+              [
+                "array",
+                9,
+                2,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "string",
+                      [
+                        111,
+                        110,
+                        101
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "string",
+                      [
+                        116,
+                        119,
+                        111
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                117,
+                110,
+                107,
+                110,
+                111,
+                119,
+                110,
+                77,
+                97,
+                112,
+                112,
+                105,
+                110,
+                103
+              ],
+              [
+                "object",
+                10,
+                "object-prototype",
+                [
+                  [
+                    [
+                      111,
+                      110,
+                      101
+                    ],
+                    [
+                      "string",
+                      [
+                        116,
+                        119,
+                        111
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.1-values-and-merge",
+      "source": "%YAML 1.1\n---\ntype: note\nlegacy: [yes, NO, 012, 0b10, 1:20, 2001-12-15]\nbase: &base {first: one}\nmerged: {<<: *base, second: two}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                108,
+                101,
+                103,
+                97,
+                99,
+                121
+              ],
+              [
+                "array",
+                1,
+                6,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "boolean",
+                      true
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "boolean",
+                      false
+                    ]
+                  ],
+                  [
+                    [
+                      50
+                    ],
+                    [
+                      "number",
+                      "4024000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      51
+                    ],
+                    [
+                      "number",
+                      "4000000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      52
+                    ],
+                    [
+                      "number",
+                      "4054000000000000"
+                    ]
+                  ],
+                  [
+                    [
+                      53
+                    ],
+                    [
+                      "date",
+                      2,
+                      "426d58f988800000"
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              [
+                "object",
+                3,
+                "object-prototype",
+                [
+                  [
+                    [
+                      102,
+                      105,
+                      114,
+                      115,
+                      116
+                    ],
+                    [
+                      "string",
+                      [
+                        111,
+                        110,
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                114,
+                103,
+                101,
+                100
+              ],
+              [
+                "object",
+                4,
+                "object-prototype",
+                [
+                  [
+                    [
+                      102,
+                      105,
+                      114,
+                      115,
+                      116
+                    ],
+                    [
+                      "string",
+                      [
+                        111,
+                        110,
+                        101
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      115,
+                      101,
+                      99,
+                      111,
+                      110,
+                      100
+                    ],
+                    [
+                      "string",
+                      [
+                        116,
+                        119,
+                        111
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.1-invalid-explicit-timestamp-falls-back",
+      "source": "%YAML 1.1\n---\ntype: note\nvalue: !!timestamp nope",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                118,
+                97,
+                108,
+                117,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  112,
+                  101
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.1-valid-explicit-timestamp-remains-date",
+      "source": "%YAML 1.1\n---\ntype: note\nvalue: !!timestamp 2026-08-24",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                118,
+                97,
+                108,
+                117,
+                101
+              ],
+              [
+                "date",
+                1,
+                "427a031111c00000"
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.1-explicit-timestamp-collection-falls-back",
+      "source": "%YAML 1.1\n---\ntype: note\nvalue: !!timestamp [nope]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                118,
+                97,
+                108,
+                117,
+                101
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "string",
+                      [
+                        110,
+                        111,
+                        112,
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.2-invalid-explicit-timestamp-remains-fatal",
+      "source": "type: note\nvalue: !!timestamp nope",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "yaml-1.2-explicit-timestamp-collection-falls-back",
+      "source": "type: note\nvalue: !!timestamp [nope]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                118,
+                97,
+                108,
+                117,
+                101
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "string",
+                      [
+                        110,
+                        111,
+                        112,
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.1-explicit-timestamp-alias-property-remains-fatal",
+      "source": "%YAML 1.1\n---\ntype: note\nvalue: !!timestamp *missing",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "surrogate-values-and-marker-collisions",
+      "sourceUnits": [
+        116,
+        121,
+        112,
+        101,
+        58,
+        32,
+        110,
+        111,
+        116,
+        101,
+        10,
+        101,
+        115,
+        99,
+        97,
+        112,
+        101,
+        100,
+        58,
+        32,
+        34,
+        92,
+        117,
+        68,
+        56,
+        48,
+        48,
+        34,
+        10,
+        108,
+        105,
+        116,
+        101,
+        114,
+        97,
+        108,
+        58,
+        32,
+        34,
+        55296,
+        34,
+        10,
+        99,
+        111,
+        108,
+        108,
+        105,
+        115,
+        105,
+        111,
+        110,
+        115,
+        58,
+        32,
+        34,
+        56192,
+        56320,
+        56192,
+        56321,
+        34
+      ],
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                115,
+                99,
+                97,
+                112,
+                101,
+                100
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            ],
+            [
+              [
+                108,
+                105,
+                116,
+                101,
+                114,
+                97,
+                108
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            ],
+            [
+              [
+                99,
+                111,
+                108,
+                108,
+                105,
+                115,
+                105,
+                111,
+                110,
+                115
+              ],
+              [
+                "string",
+                [
+                  56192,
+                  56320,
+                  56192,
+                  56321
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "javascript-own-property-order",
+      "source": "type: note\nfirst: 1\n\"10\": ten\n\"2\": two\nsecond: 2\n\"01\": leading",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                50
+              ],
+              [
+                "string",
+                [
+                  116,
+                  119,
+                  111
+                ]
+              ]
+            ],
+            [
+              [
+                49,
+                48
+              ],
+              [
+                "string",
+                [
+                  116,
+                  101,
+                  110
+                ]
+              ]
+            ],
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "number",
+                "3ff0000000000000"
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ],
+              [
+                "number",
+                "4000000000000000"
+              ]
+            ],
+            [
+              [
+                48,
+                49
+              ],
+              [
+                "string",
+                [
+                  108,
+                  101,
+                  97,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "accepted-string-key-forms",
+      "source": "type: note\n\"1\": quoted\n!!str true: explicit\n!application/custom tagged: unknown\nanchor: &key aliased\n? *key\n: alias\nbase: &base {merged: yes}\nresult: {!!merge <<: *base, direct: yes}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                49
+              ],
+              [
+                "string",
+                [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                116,
+                114,
+                117,
+                101
+              ],
+              [
+                "string",
+                [
+                  101,
+                  120,
+                  112,
+                  108,
+                  105,
+                  99,
+                  105,
+                  116
+                ]
+              ]
+            ],
+            [
+              [
+                116,
+                97,
+                103,
+                103,
+                101,
+                100
+              ],
+              [
+                "string",
+                [
+                  117,
+                  110,
+                  107,
+                  110,
+                  111,
+                  119,
+                  110
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                110,
+                99,
+                104,
+                111,
+                114
+              ],
+              [
+                "string",
+                [
+                  97,
+                  108,
+                  105,
+                  97,
+                  115,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                108,
+                105,
+                97,
+                115,
+                101,
+                100
+              ],
+              [
+                "string",
+                [
+                  97,
+                  108,
+                  105,
+                  97,
+                  115
+                ]
+              ]
+            ],
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              [
+                "object",
+                1,
+                "object-prototype",
+                [
+                  [
+                    [
+                      109,
+                      101,
+                      114,
+                      103,
+                      101,
+                      100
+                    ],
+                    [
+                      "string",
+                      [
+                        121,
+                        101,
+                        115
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                114,
+                101,
+                115,
+                117,
+                108,
+                116
+              ],
+              [
+                "object",
+                2,
+                "object-prototype",
+                [
+                  [
+                    [
+                      109,
+                      101,
+                      114,
+                      103,
+                      101,
+                      100
+                    ],
+                    [
+                      "string",
+                      [
+                        121,
+                        101,
+                        115
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      100,
+                      105,
+                      114,
+                      101,
+                      99,
+                      116
+                    ],
+                    [
+                      "string",
+                      [
+                        121,
+                        101,
+                        115
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "alias-resolved-object-collisions",
+      "source": "type: note\nfirstKey: &firstKey first\n? *firstKey\n: alias-first\nfirst: direct-last\nsecond: direct-first\nsecondKey: &secondKey second\n? *secondKey\n: alias-last\nthirdKey: &thirdKey third\n? *thirdKey\n: first-alias\n? *thirdKey\n: second-alias",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116,
+                75,
+                101,
+                121
+              ],
+              [
+                "string",
+                [
+                  102,
+                  105,
+                  114,
+                  115,
+                  116
+                ]
+              ]
+            ],
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "string",
+                [
+                  100,
+                  105,
+                  114,
+                  101,
+                  99,
+                  116,
+                  45,
+                  108,
+                  97,
+                  115,
+                  116
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ],
+              [
+                "string",
+                [
+                  97,
+                  108,
+                  105,
+                  97,
+                  115,
+                  45,
+                  108,
+                  97,
+                  115,
+                  116
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100,
+                75,
+                101,
+                121
+              ],
+              [
+                "string",
+                [
+                  115,
+                  101,
+                  99,
+                  111,
+                  110,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                116,
+                104,
+                105,
+                114,
+                100,
+                75,
+                101,
+                121
+              ],
+              [
+                "string",
+                [
+                  116,
+                  104,
+                  105,
+                  114,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                116,
+                104,
+                105,
+                114,
+                100
+              ],
+              [
+                "string",
+                [
+                  115,
+                  101,
+                  99,
+                  111,
+                  110,
+                  100,
+                  45,
+                  97,
+                  108,
+                  105,
+                  97,
+                  115
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "alias-resolved-set-collisions",
+      "source": "type: note\nkey: &key duplicate\nextension: !!set\n  ? duplicate\n  ? *key\n  ? *key",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                107,
+                101,
+                121
+              ],
+              [
+                "string",
+                [
+                  100,
+                  117,
+                  112,
+                  108,
+                  105,
+                  99,
+                  97,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "set",
+                1,
+                [
+                  [
+                    "string",
+                    [
+                      100,
+                      117,
+                      112,
+                      108,
+                      105,
+                      99,
+                      97,
+                      116,
+                      101
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tagged-set-implicit-null-values",
+      "source": "type: note\nextension: !!set {empty:, bare, null: null, tilde: ~}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "tagged-set-inside-pairs",
+      "source": "type: note\nextension: !!pairs [!!set {a: null}]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "object",
+                      2,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            97
+                          ],
+                          [
+                            "null"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tagged-set-inside-omap",
+      "source": "type: note\nextension: !!omap [!!set {a: null}]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "map",
+                1,
+                [
+                  [
+                    [
+                      "string",
+                      [
+                        97
+                      ]
+                    ],
+                    [
+                      "null"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tagged-set-merge-source",
+      "source": "base: &base !!set {x: null}\nmerged: {!!merge anything: *base}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              [
+                "set",
+                1,
+                [
+                  [
+                    "string",
+                    [
+                      120
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                114,
+                103,
+                101,
+                100
+              ],
+              [
+                "object",
+                2,
+                "object-prototype",
+                [
+                  [
+                    [
+                      120
+                    ],
+                    [
+                      "undefined"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tagged-set-merge-string-iteration",
+      "source": "base: &base !!set {\"\": null, x: null, shared: null, \"😀x\": null}\nmerged: {!!merge anything: *base}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              [
+                "set",
+                1,
+                [
+                  [
+                    "string",
+                    []
+                  ],
+                  [
+                    "string",
+                    [
+                      120
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      115,
+                      104,
+                      97,
+                      114,
+                      101,
+                      100
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      55357,
+                      56832,
+                      120
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                114,
+                103,
+                101,
+                100
+              ],
+              [
+                "object",
+                2,
+                "object-prototype",
+                [
+                  [
+                    [
+                      117,
+                      110,
+                      100,
+                      101,
+                      102,
+                      105,
+                      110,
+                      101,
+                      100
+                    ],
+                    [
+                      "undefined"
+                    ]
+                  ],
+                  [
+                    [
+                      120
+                    ],
+                    [
+                      "undefined"
+                    ]
+                  ],
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        104
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      55357,
+                      56832
+                    ],
+                    [
+                      "string",
+                      [
+                        120
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "multiple-tagged-set-merge-sources",
+      "source": "first: &first !!set {x: null, same: null}\nsecond: &second !!set {solo: null, y: null}\nmerged: {!!merge anything: [*first, *second]}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "set",
+                1,
+                [
+                  [
+                    "string",
+                    [
+                      120
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      115,
+                      97,
+                      109,
+                      101
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ],
+              [
+                "set",
+                2,
+                [
+                  [
+                    "string",
+                    [
+                      115,
+                      111,
+                      108,
+                      111
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      121
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                114,
+                103,
+                101,
+                100
+              ],
+              [
+                "object",
+                3,
+                "object-prototype",
+                [
+                  [
+                    [
+                      120
+                    ],
+                    [
+                      "undefined"
+                    ]
+                  ],
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        97
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      121
+                    ],
+                    [
+                      "undefined"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "map-and-tagged-set-merge-precedence",
+      "source": "map: &map {s: map, mapOnly: value}\nset: &set !!set {shared: null, setOnly: null}\nmapFirst: {!!merge anything: [*map, *set]}\nsetFirst: {!!merge anything: [*set, *map]}\ndirect: {!!merge anything: *set, s: direct}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                109,
+                97,
+                112
+              ],
+              [
+                "object",
+                1,
+                "object-prototype",
+                [
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        109,
+                        97,
+                        112
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      109,
+                      97,
+                      112,
+                      79,
+                      110,
+                      108,
+                      121
+                    ],
+                    [
+                      "string",
+                      [
+                        118,
+                        97,
+                        108,
+                        117,
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                116
+              ],
+              [
+                "set",
+                2,
+                [
+                  [
+                    "string",
+                    [
+                      115,
+                      104,
+                      97,
+                      114,
+                      101,
+                      100
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      115,
+                      101,
+                      116,
+                      79,
+                      110,
+                      108,
+                      121
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                109,
+                97,
+                112,
+                70,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "object",
+                3,
+                "object-prototype",
+                [
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        109,
+                        97,
+                        112
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      109,
+                      97,
+                      112,
+                      79,
+                      110,
+                      108,
+                      121
+                    ],
+                    [
+                      "string",
+                      [
+                        118,
+                        97,
+                        108,
+                        117,
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                116,
+                70,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "object",
+                4,
+                "object-prototype",
+                [
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        104
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      109,
+                      97,
+                      112,
+                      79,
+                      110,
+                      108,
+                      121
+                    ],
+                    [
+                      "string",
+                      [
+                        118,
+                        97,
+                        108,
+                        117,
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                100,
+                105,
+                114,
+                101,
+                99,
+                116
+              ],
+              [
+                "object",
+                5,
+                "object-prototype",
+                [
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        100,
+                        105,
+                        114,
+                        101,
+                        99,
+                        116
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tagged-set-merge-preserves-alias-identity",
+      "source": "base: &base !!set {first: null, second: null}\nalias: *base\nmerged: {!!merge anything: *base}",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              [
+                "set",
+                1,
+                [
+                  [
+                    "string",
+                    [
+                      102,
+                      105,
+                      114,
+                      115,
+                      116
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      115,
+                      101,
+                      99,
+                      111,
+                      110,
+                      100
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                108,
+                105,
+                97,
+                115
+              ],
+              [
+                "reference",
+                1
+              ]
+            ],
+            [
+              [
+                109,
+                101,
+                114,
+                103,
+                101,
+                100
+              ],
+              [
+                "object",
+                2,
+                "object-prototype",
+                [
+                  [
+                    [
+                      102
+                    ],
+                    [
+                      "string",
+                      [
+                        105
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      115
+                    ],
+                    [
+                      "string",
+                      [
+                        101
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "omap-explicit-merge-symbol-key-rejected",
+      "source": "type: note\nextension: !!omap [{!!merge <<: {a: b}}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "yaml-1.1-omap-merge-symbol-key-rejected",
+      "source": "%YAML 1.1\n---\ntype: note\nextension: !!omap [{<<: {a: b}}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "yaml-1.1-anchored-implicit-merge-alias-value",
+      "source": "%YAML 1.1\n---\ntype: note\nbase: &base {a: b}\n&merge <<: *base\naliasValue: *merge",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              [
+                "object",
+                1,
+                "object-prototype",
+                [
+                  [
+                    [
+                      97
+                    ],
+                    [
+                      "string",
+                      [
+                        98
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                97
+              ],
+              [
+                "string",
+                [
+                  98
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                108,
+                105,
+                97,
+                115,
+                86,
+                97,
+                108,
+                117,
+                101
+              ],
+              [
+                "symbol",
+                0,
+                [
+                  60,
+                  60
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "yaml-1.1-anchored-implicit-merge-alias-key",
+      "source": "%YAML 1.1\n---\ntype: note\nbase: &base {a: b}\n&merge <<: *base\n? *merge\n: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "omap-alias-equivalent-source-pairs",
+      "source": "type: note\nkey: &key duplicate\nextension: !!omap\n  -\n    ? *key\n    : first\n    duplicate: second",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-alias-equivalent-source-pairs",
+      "source": "type: note\nkey: &key duplicate\nextension: !!pairs\n  -\n    ? *key\n    : first\n    duplicate: second",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-single-merge-source-pair",
+      "source": "type: note\nextension: !!pairs [{!!merge <<: {a: b, c: d}}]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "object",
+                      2,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            97
+                          ],
+                          [
+                            "string",
+                            [
+                              98
+                            ]
+                          ]
+                        ],
+                        [
+                          [
+                            99
+                          ],
+                          [
+                            "string",
+                            [
+                              100
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "pairs-preserves-value-anchor",
+      "source": "type: note\nextension: !!pairs [{a: &value kept}]\nafter: *value",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "object",
+                      2,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            97
+                          ],
+                          [
+                            "string",
+                            [
+                              107,
+                              101,
+                              112,
+                              116
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                102,
+                116,
+                101,
+                114
+              ],
+              [
+                "string",
+                [
+                  107,
+                  101,
+                  112,
+                  116
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "normal-sequence-preserves-mapping-anchor",
+      "source": "type: note\nextension: [&mapping {a: null}]\nafter: *mapping",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "object",
+                      2,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            97
+                          ],
+                          [
+                            "null"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                102,
+                116,
+                101,
+                114
+              ],
+              [
+                "reference",
+                2
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "pairs-preserves-outer-anchor",
+      "source": "type: note\nextension: &pairs !!pairs [{a: null}]\nafter: *pairs",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                101,
+                120,
+                116,
+                101,
+                110,
+                115,
+                105,
+                111,
+                110
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "object",
+                      2,
+                      "object-prototype",
+                      [
+                        [
+                          [
+                            97
+                          ],
+                          [
+                            "null"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                102,
+                116,
+                101,
+                114
+              ],
+              [
+                "reference",
+                1
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "pairs-empty-entry",
+      "source": "type: note\nextension: !!pairs [{}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-two-source-pairs",
+      "source": "type: note\nextension: !!pairs [{a: b, c: d}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-merge-plus-direct-source-pairs",
+      "source": "type: note\nextension: !!pairs [{!!merge <<: {a: b}, c: d}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-tagged-set-with-two-source-pairs",
+      "source": "type: note\nextension: !!pairs [!!set {a: null, b: null}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-tagged-set-with-non-null-value",
+      "source": "type: note\nextension: !!pairs [!!set {a: value}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-consumes-mapping-anchor-before-self-reference",
+      "source": "type: note\nextension: !!pairs [&mapping {self: *mapping}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "pairs-consumes-mapping-anchor-before-after-reference",
+      "source": "type: note\nextension: !!pairs [&mapping {a: null}]\nafter: *mapping",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "omap-consumes-mapping-anchor-before-self-reference",
+      "source": "type: note\nextension: !!omap [&mapping {self: *mapping}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "omap-consumes-mapping-anchor-before-after-reference",
+      "source": "type: note\nextension: !!omap [&mapping {a: null}]\nafter: *mapping",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "alias-limit-near-threshold-accepted",
+      "source": "type: note\na: &a [x]\nb: &b [*a, *a]\naccepted: [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b]",
+      "outcome": {
+        "kind": "return",
+        "value": [
+          "object",
+          0,
+          "object-prototype",
+          [
+            [
+              [
+                116,
+                121,
+                112,
+                101
+              ],
+              [
+                "string",
+                [
+                  110,
+                  111,
+                  116,
+                  101
+                ]
+              ]
+            ],
+            [
+              [
+                97
+              ],
+              [
+                "array",
+                1,
+                1,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "string",
+                      [
+                        120
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                98
+              ],
+              [
+                "array",
+                2,
+                2,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "reference",
+                      1
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "reference",
+                      1
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                99,
+                99,
+                101,
+                112,
+                116,
+                101,
+                100
+              ],
+              [
+                "array",
+                3,
+                32,
+                [
+                  [
+                    [
+                      48
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      51
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      52
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      53
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      54
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      55
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      56
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      57
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      48
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      49
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      50
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      51
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      52
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      53
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      54
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      55
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      56
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      49,
+                      57
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      48
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      49
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      50
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      51
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      52
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      53
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      54
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      55
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      56
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      50,
+                      57
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      51,
+                      48
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ],
+                  [
+                    [
+                      51,
+                      49
+                    ],
+                    [
+                      "reference",
+                      2
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "non-string-root-number",
+      "source": "type: note\n1: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-float",
+      "source": "type: note\n1.5: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-explicit-int",
+      "source": "type: note\n!!int 1: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-boolean",
+      "source": "type: note\ntrue: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-null",
+      "source": "type: note\nnull: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-date",
+      "source": "type: note\n!!timestamp 2026-08-24: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-binary",
+      "source": "type: note\n!!binary SGVsbG8=: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-symbol",
+      "source": "type: note\n!!merge anything: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-sequence",
+      "source": "type: note\n? [one, two]\n: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-root-map",
+      "source": "type: note\n? {one: two}\n: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-nested",
+      "source": "type: note\nextension: {1: value}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-alias-number",
+      "source": "type: note\nnumber: &number 1\n? *number\n: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-alias-map",
+      "source": "type: note\nmap: &map {one: two}\n? *map\n: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-alias-merge-symbol",
+      "source": "type: note\nsymbol: &symbol !!merge value\n? *symbol\n: value",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-set",
+      "source": "type: note\nextension: !!set {1: null}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "duplicate-string-set-key",
+      "source": "type: note\nextension: !!set\n  ? duplicate\n  ? duplicate",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "tagged-set-explicit-null-value",
+      "source": "type: note\nextension: !!set {a: !!null null}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "invalid-tagged-set-merge-source-value",
+      "source": "base: &base !!set {x: value}\nmerged: {!!merge anything: *base}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "scalar-merge-source",
+      "source": "base: &base value\nmerged: {!!merge anything: *base}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "sequence-with-non-map-merge-source",
+      "source": "base: &base [value]\nmerged: {!!merge anything: *base}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-omap",
+      "source": "type: note\nextension: !!omap [{1: value}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-pairs",
+      "source": "type: note\nextension: !!pairs [{1: value}]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "non-string-merge-source",
+      "source": "type: note\nbase: &base {1: value}\nextension: {!!merge <<: *base}",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "malformed",
+      "source": "type: [",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "duplicate-key",
+      "source": "type: note\ntype: guide",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "multiple-documents",
+      "source": "type: note\n---\ntype: guide",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "unknown-alias",
+      "source": "type: note\nextension: *missing",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    },
+    {
+      "id": "alias-limit-over-threshold",
+      "source": "type: note\na: &a [x]\nb: &b [*a, *a]\nrejected: [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b, *b]",
+      "outcome": {
+        "kind": "throw",
+        "diagnostic": {
+          "code": "ERR_OKF_PARSE",
+          "path": "oracle/yaml.md",
+          "message": "Cannot parse OKF concept: oracle/yaml.md"
+        }
+      }
+    }
+  ],
+  "representation": [
+    "object",
+    0,
+    "object-prototype",
+    [
+      [
+        [
+          97,
+          98,
+          115,
+          101,
+          110,
+          116
+        ],
+        [
+          "object",
+          1,
+          "object-prototype",
+          []
+        ]
+      ],
+      [
+        [
+          101,
+          120,
+          112,
+          108,
+          105,
+          99,
+          105,
+          116,
+          85,
+          110,
+          100,
+          101,
+          102,
+          105,
+          110,
+          101,
+          100
+        ],
+        [
+          "object",
+          2,
+          "object-prototype",
+          [
+            [
+              [
+                118,
+                97,
+                108,
+                117,
+                101
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          115,
+          112,
+          97,
+          114,
+          115,
+          101
+        ],
+        [
+          "array",
+          3,
+          3,
+          [
+            [
+              [
+                49
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          110,
+          117,
+          109,
+          98,
+          101,
+          114,
+          115
+        ],
+        [
+          "array",
+          4,
+          6,
+          [
+            [
+              [
+                48
+              ],
+              [
+                "number",
+                "0000000000000000"
+              ]
+            ],
+            [
+              [
+                49
+              ],
+              [
+                "number",
+                "8000000000000000"
+              ]
+            ],
+            [
+              [
+                50
+              ],
+              [
+                "number",
+                "7ff8000000000000"
+              ]
+            ],
+            [
+              [
+                51
+              ],
+              [
+                "number",
+                "7ff0000000000000"
+              ]
+            ],
+            [
+              [
+                52
+              ],
+              [
+                "number",
+                "fff0000000000000"
+              ]
+            ],
+            [
+              [
+                53
+              ],
+              [
+                "number",
+                "3ff8000000000000"
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          115,
+          116,
+          114,
+          105,
+          110,
+          103,
+          115
+        ],
+        [
+          "array",
+          5,
+          4,
+          [
+            [
+              [
+                48
+              ],
+              [
+                "string",
+                [
+                  99,
+                  97,
+                  102,
+                  233
+                ]
+              ]
+            ],
+            [
+              [
+                49
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            ],
+            [
+              [
+                50
+              ],
+              [
+                "string",
+                [
+                  56320
+                ]
+              ]
+            ],
+            [
+              [
+                51
+              ],
+              [
+                "string",
+                [
+                  55296,
+                  56320
+                ]
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          111,
+          114,
+          100,
+          101,
+          114
+        ],
+        [
+          "object",
+          6,
+          "object-prototype",
+          [
+            [
+              [
+                50
+              ],
+              [
+                "string",
+                [
+                  116,
+                  119,
+                  111
+                ]
+              ]
+            ],
+            [
+              [
+                49,
+                48
+              ],
+              [
+                "string",
+                [
+                  116,
+                  101,
+                  110
+                ]
+              ]
+            ],
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "number",
+                "3ff0000000000000"
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ],
+              [
+                "number",
+                "4000000000000000"
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          97,
+          108,
+          105,
+          97,
+          115,
+          101,
+          115
+        ],
+        [
+          "object",
+          7,
+          "object-prototype",
+          [
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "object",
+                8,
+                "object-prototype",
+                [
+                  [
+                    [
+                      109,
+                      97,
+                      114,
+                      107,
+                      101,
+                      114
+                    ],
+                    [
+                      "string",
+                      [
+                        115,
+                        104,
+                        97,
+                        114,
+                        101,
+                        100
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ],
+              [
+                "reference",
+                8
+              ]
+            ],
+            [
+              [
+                99,
+                121,
+                99,
+                108,
+                101
+              ],
+              [
+                "object",
+                9,
+                "object-prototype",
+                [
+                  [
+                    [
+                      115,
+                      104,
+                      97,
+                      114,
+                      101,
+                      100
+                    ],
+                    [
+                      "reference",
+                      8
+                    ]
+                  ],
+                  [
+                    [
+                      115,
+                      101,
+                      108,
+                      102
+                    ],
+                    [
+                      "reference",
+                      9
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          115,
+          121,
+          109,
+          98,
+          111,
+          108,
+          115
+        ],
+        [
+          "object",
+          10,
+          "object-prototype",
+          [
+            [
+              [
+                102,
+                105,
+                114,
+                115,
+                116
+              ],
+              [
+                "symbol",
+                0,
+                [
+                  115,
+                  104,
+                  97,
+                  114,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                108,
+                105,
+                97,
+                115
+              ],
+              [
+                "symbol",
+                0,
+                [
+                  115,
+                  104,
+                  97,
+                  114,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                100,
+                105,
+                115,
+                116,
+                105,
+                110,
+                99,
+                116
+              ],
+              [
+                "symbol",
+                1,
+                [
+                  115,
+                  104,
+                  97,
+                  114,
+                  101,
+                  100
+                ]
+              ]
+            ],
+            [
+              [
+                97,
+                110,
+                111,
+                110,
+                121,
+                109,
+                111,
+                117,
+                115
+              ],
+              [
+                "symbol",
+                2,
+                null
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          100,
+          97,
+          116,
+          101
+        ],
+        [
+          "date",
+          11,
+          "427a031111c00000"
+        ]
+      ],
+      [
+        [
+          109,
+          97,
+          112
+        ],
+        [
+          "map",
+          12,
+          [
+            [
+              [
+                "reference",
+                8
+              ],
+              [
+                "string",
+                [
+                  111,
+                  98,
+                  106,
+                  101,
+                  99,
+                  116,
+                  32,
+                  107,
+                  101,
+                  121
+                ]
+              ]
+            ],
+            [
+              [
+                "string",
+                [
+                  115,
+                  101,
+                  99,
+                  111,
+                  110,
+                  100
+                ]
+              ],
+              [
+                "reference",
+                9
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          115,
+          101,
+          116
+        ],
+        [
+          "set",
+          13,
+          [
+            [
+              "reference",
+              8
+            ],
+            [
+              "string",
+              [
+                115,
+                101,
+                99,
+                111,
+                110,
+                100
+              ]
+            ]
+          ]
+        ]
+      ],
+      [
+        [
+          98,
+          121,
+          116,
+          101,
+          115
+        ],
+        [
+          "array-buffer-view",
+          14,
+          "Buffer",
+          "AAH+/w=="
+        ]
+      ]
+    ]
+  ],
+  "utf16Order": [
+    [
+      97
+    ],
+    [
+      55296
+    ],
+    [
+      55296,
+      56320
+    ],
+    [
+      56320
+    ],
+    [
+      57344
+    ]
+  ],
+  "prepareParseError": {
+    "name": "PrepareError",
+    "code": "ERR_OKF_PARSE",
+    "path": "oracle/yaml.md",
+    "message": "Cannot parse OKF concept: oracle/yaml.md",
+    "fieldPresent": false,
+    "causePresent": false,
+    "ownEnumerableKeys": [
+      "code",
+      "path",
+      "name"
+    ],
+    "ownPropertyNames": [
+      "stack",
+      "message",
+      "code",
+      "path",
+      "name"
+    ]
+  },
+  "outerFrontmatterBomParseError": {
+    "name": "PrepareError",
+    "code": "ERR_OKF_PARSE",
+    "path": "oracle/outer-bom.md",
+    "message": "Cannot parse OKF concept: oracle/outer-bom.md",
+    "fieldPresent": false,
+    "causePresent": false,
+    "ownEnumerableKeys": [
+      "code",
+      "path",
+      "name"
+    ],
+    "ownPropertyNames": [
+      "stack",
+      "message",
+      "code",
+      "path",
+      "name"
+    ]
+  }
+}

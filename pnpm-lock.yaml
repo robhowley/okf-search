@@ -61,10 +61,10 @@ importers:
   packages/okf-prepare:
     dependencies:
       mdast-util-from-markdown:
-        specifier: ^2.0.3
+        specifier: 2.0.3
         version: 2.0.3
       yaml:
-        specifier: ^2.9.0
+        specifier: 2.9.0
         version: 2.9.0
     devDependencies:
       '@types/mdast':
@@ -73,6 +73,12 @@ importers:
       '@types/unist':
         specifier: ^3.0.3
         version: 3.0.3
+
+  packages/okf-prepare-native:
+    dependencies:
+      '@okf-internal/prepare':
+        specifier: workspace:*
+        version: link:../okf-prepare
 
   packages/okf-search-native:
     devDependencies:

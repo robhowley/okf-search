@@ -1,0 +1,329 @@
+{
+  "schemaVersion": 1,
+  "fingerprint": "9e507a36a01dce90240db310a40a412b5245c0f9daaf8aec34a213c4b6102f21",
+  "bytes": 340175,
+  "repeatCount": 10,
+  "byteIdentical": true,
+  "dependencies": {
+    "mdast-util-from-markdown": "2.0.3",
+    "yaml": "2.9.0"
+  },
+  "exports": {
+    "root": [
+      "PrepareError",
+      "createPrepareBundleSentinel",
+      "isOkfConformance",
+      "isOkfStatus",
+      "isOkfTrustTier",
+      "normalizeOkfDocumentIdentity",
+      "prepareOkfDocument",
+      "prepareOkfDocuments",
+      "validateOkfDocument"
+    ],
+    "node": [
+      "readOkfDocuments"
+    ]
+  },
+  "fixtureInventory": {
+    "oracleCases": [
+      "strict-rich-yaml-and-markdown",
+      "degraded-diagnostic-order",
+      "fatal-missing-type",
+      "fatal-duplicate-yaml-key",
+      "line-endings-crlf",
+      "line-endings-lone-cr-body",
+      "chunk-801-words",
+      "lone-surrogate-path-and-body",
+      "batch-order-astral",
+      "batch-order-private-use"
+    ],
+    "demo": {
+      "schemaVersion": 1,
+      "documentCount": 42,
+      "totalBytes": 57038,
+      "documents": [
+        {
+          "path": "ceramics/bisque-inspection.md",
+          "bytes": 1361
+        },
+        {
+          "path": "ceramics/clay-reclaim.md",
+          "bytes": 1289
+        },
+        {
+          "path": "ceramics/dust-control.md",
+          "bytes": 1397
+        },
+        {
+          "path": "ceramics/exhibition-packing.md",
+          "bytes": 1463
+        },
+        {
+          "path": "ceramics/firing-schedule.md",
+          "bytes": 1392
+        },
+        {
+          "path": "ceramics/glaze-mixing.md",
+          "bytes": 1363
+        },
+        {
+          "path": "ceramics/kiln-loading.md",
+          "bytes": 1248
+        },
+        {
+          "path": "ceramics/studio-opening.md",
+          "bytes": 1353
+        },
+        {
+          "path": "ceramics/tool-checkout.md",
+          "bytes": 1316
+        },
+        {
+          "path": "ceramics/wheel-maintenance.md",
+          "bytes": 1289
+        },
+        {
+          "path": "gardens/autumn-garden-checklist.md",
+          "bytes": 336
+        },
+        {
+          "path": "gardens/composting.md",
+          "bytes": 1458
+        },
+        {
+          "path": "gardens/crop-rotation.md",
+          "bytes": 1477
+        },
+        {
+          "path": "gardens/drip-irrigation.md",
+          "bytes": 1474
+        },
+        {
+          "path": "gardens/experimental-mulch-notes.md",
+          "bytes": 588
+        },
+        {
+          "path": "gardens/greenhouse-basics.md",
+          "bytes": 1518
+        },
+        {
+          "path": "gardens/harvest-storage.md",
+          "bytes": 1462
+        },
+        {
+          "path": "gardens/pest-management.md",
+          "bytes": 1549
+        },
+        {
+          "path": "gardens/pollinator-habitat.md",
+          "bytes": 1522
+        },
+        {
+          "path": "gardens/seasonal-planning.md",
+          "bytes": 1496
+        },
+        {
+          "path": "gardens/seed-starting.md",
+          "bytes": 1452
+        },
+        {
+          "path": "gardens/soil-health.md",
+          "bytes": 1334
+        },
+        {
+          "path": "observatory/calibration-frames.md",
+          "bytes": 1397
+        },
+        {
+          "path": "observatory/data-handoff.md",
+          "bytes": 1345
+        },
+        {
+          "path": "observatory/dome-shutdown.md",
+          "bytes": 1311
+        },
+        {
+          "path": "observatory/equipment-inventory.md",
+          "bytes": 1347
+        },
+        {
+          "path": "observatory/night-schedule.md",
+          "bytes": 1249
+        },
+        {
+          "path": "observatory/spectral-imaging.md",
+          "bytes": 1497
+        },
+        {
+          "path": "observatory/telescope-alignment.md",
+          "bytes": 1241
+        },
+        {
+          "path": "observatory/transient-alerts.md",
+          "bytes": 1438
+        },
+        {
+          "path": "observatory/visitor-nights.md",
+          "bytes": 1349
+        },
+        {
+          "path": "observatory/weather-gates.md",
+          "bytes": 1242
+        },
+        {
+          "path": "railway/brake-test.md",
+          "bytes": 1438
+        },
+        {
+          "path": "railway/depot-closeout.md",
+          "bytes": 1417
+        },
+        {
+          "path": "railway/incident-radio.md",
+          "bytes": 1444
+        },
+        {
+          "path": "railway/passenger-recovery.md",
+          "bytes": 1489
+        },
+        {
+          "path": "railway/platform-dispatch.md",
+          "bytes": 1438
+        },
+        {
+          "path": "railway/signal-inspection.md",
+          "bytes": 1513
+        },
+        {
+          "path": "railway/switch-freeze-response.md",
+          "bytes": 1501
+        },
+        {
+          "path": "railway/timetable-change.md",
+          "bytes": 1501
+        },
+        {
+          "path": "railway/track-walk.md",
+          "bytes": 1486
+        },
+        {
+          "path": "railway/yard-handoff.md",
+          "bytes": 1258
+        }
+      ]
+    }
+  },
+  "shapeInventory": {
+    "strictPrepared": [
+      "conformance",
+      "identity",
+      "type",
+      "metadata",
+      "facets",
+      "sections",
+      "diagnostics",
+      "document"
+    ],
+    "strictIdentity": [
+      "path",
+      "documentId"
+    ],
+    "strictMetadata": [
+      "title",
+      "description",
+      "resource",
+      "tags",
+      "sourceText"
+    ],
+    "strictFacets": [
+      "status",
+      "trust",
+      "staleness"
+    ],
+    "strictSection": [
+      "id",
+      "headingPath",
+      "text",
+      "startLine",
+      "endLine"
+    ],
+    "strictDocument": [
+      "id",
+      "type",
+      "title",
+      "tags",
+      "sources",
+      "verified",
+      "body",
+      "extensions",
+      "description",
+      "resource",
+      "usageWindow",
+      "generated",
+      "status",
+      "staleAfter",
+      "runtime",
+      "parameters",
+      "computation",
+      "executor",
+      "attester"
+    ],
+    "degradedPrepared": [
+      "conformance",
+      "identity",
+      "type",
+      "metadata",
+      "facets",
+      "sections",
+      "diagnostics"
+    ],
+    "degradedDiagnostic": [
+      "code",
+      "path",
+      "field",
+      "message"
+    ],
+    "validationStrict": [
+      "isValid",
+      "isIndexable",
+      "errors"
+    ],
+    "validationDegraded": [
+      "isValid",
+      "isIndexable",
+      "errors"
+    ],
+    "prepareError": {
+      "ownEnumerableKeys": [
+        "code",
+        "path",
+        "name",
+        "field"
+      ],
+      "ownPropertyNames": [
+        "message",
+        "cause",
+        "code",
+        "path",
+        "name",
+        "field"
+      ],
+      "name": "PrepareError",
+      "message": "Invalid OKF field: oracle/error.md (title)",
+      "code": "ERR_OKF_FIELD",
+      "path": "oracle/error.md",
+      "field": "title",
+      "cause": {
+        "present": true,
+        "category": "TypeError"
+      }
+    }
+  },
+  "demo": {
+    "documents": 42,
+    "bytes": 57038,
+    "manifestFingerprint": "294ebf09df161737de19cdf92c51a2a7a66593a72b88f78a899f93ab495c3c27",
+    "sections": 162,
+    "degradedDocuments": 1
+  }
+}

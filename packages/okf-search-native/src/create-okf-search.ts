@@ -1,18 +1,8 @@
-import {
-  PrepareError,
-  normalizeOkfDocumentIdentity,
-  prepareOkfDocument,
-  prepareOkfDocuments,
-} from "@okf-internal/prepare";
 import { NativeOkfSearch } from "../native.cjs";
 
-import { OkfError } from "./errors.js";
-import { mapPreparedDocument, mapPreparedDocuments } from "./prepared-to-native.js";
+import { OkfError, POISON_MARKER, nativeMessage, throwNativeError } from "./errors.js";
 import { sanitizeSearchOptions } from "./search-options.js";
 
-import type {
-  PreparedOkfDocument,
-} from "@okf-internal/prepare";
 import type {
   IndexStats as NativeIndexStats,
   SearchHit as NativeSearchHit,
@@ -30,30 +20,19 @@ import type {
   OkfSearchHit,
 } from "./types.js";
 
-const POISON_MARKER = /^\[ERR_OKF_INDEX_UNUSABLE\](?: |$)/;
-const NATIVE_MARKER = /^\[ERR_OKF_[A-Z_]+\](?: |$)/;
-const INVALID_SEARCH_OPTIONS_MARKER =
-  /^\[ERR_OKF_INVALID_SEARCH_OPTIONS\](?: |$)/;
-
 export function createOkfSearch(
   documents: readonly OkfDocumentInput[],
 ): OkfSearch {
-  let prepared: readonly PreparedOkfDocument[];
-
+  // Finish caller iteration and getters before translating native failures.
+  const inputs = [...documents].map(snapshotInput);
   try {
-    prepared = prepareOkfDocuments(documents);
-  } catch (error) {
-    throwPreparationError(error);
-  }
-
-  let native: NativeOkfSearch;
-
-  try {
-    native = NativeOkfSearch.fromPrepared(mapPreparedDocuments(prepared));
+    return wrapNative(NativeOkfSearch.fromRaw(inputs));
   } catch (error) {
     throwNativeError(error, "<index>");
   }
+}
 
+export function wrapNative(native: NativeOkfSearch): OkfSearch {
   let unusableError: OkfError | undefined;
 
   const assertUsable = (): void => {
@@ -69,7 +48,11 @@ export function createOkfSearch(
       return call();
     } catch (error) {
       if (nativeMessage(error).match(POISON_MARKER)) {
-        unusableError ??= new OkfError("ERR_OKF_INDEX_UNUSABLE", path);
+        const nativePath = error instanceof Error
+          ? Object.getOwnPropertyDescriptor(error, "path")?.value
+          : undefined;
+        const failurePath = typeof nativePath === "string" ? nativePath : path;
+        unusableError ??= new OkfError("ERR_OKF_INDEX_UNUSABLE", failurePath);
         throw unusableError;
       }
 
@@ -84,32 +67,9 @@ export function createOkfSearch(
     },
 
     ingest(input): OkfIngestResult {
-      assertUsable();
-
-      let result: PreparedOkfDocument;
-      try {
-        result = prepareOkfDocument(input);
-      } catch (error) {
-        throwPreparationError(error);
-      }
-
-      callNative(result.identity.path, () => {
-        native.ingestPrepared(mapPreparedDocument(result));
-      });
-
-      if (result.conformance === "strict") {
-        return {
-          conformance: "strict",
-          document: result.document,
-        };
-      }
-
-      return {
-        conformance: "degraded",
-        documentId: result.identity.documentId,
-        path: result.identity.path,
-        diagnostics: copyNonEmptyDiagnostics(result.diagnostics),
-      };
+      callNative("<index>", () => native.assertUsable());
+      const snapshot = snapshotInput(input);
+      return callNative("<index>", () => native.ingestRaw(snapshot)) as OkfIngestResult;
     },
 
     listDegradedDocuments(): readonly OkfDegradedDocument[] {
@@ -131,17 +91,7 @@ export function createOkfSearch(
     remove(path): boolean {
       assertUsable();
 
-      let identity;
-      try {
-        identity = normalizeOkfDocumentIdentity(path);
-      } catch (error) {
-        throwPreparationError(error);
-      }
-
-      return callNative(
-        identity.path,
-        () => native.removeDocument(identity.documentId),
-      );
+      return callNative("<index>", () => native.removePath(path));
     },
 
     search(query, options): OkfSearchHit[] {
@@ -163,32 +113,8 @@ export function createOkfSearch(
   };
 }
 
-function throwPreparationError(error: unknown): never {
-  if (error instanceof PrepareError) {
-    throw new OkfError(error.code, error.path, {
-      ...(error.field === undefined ? {} : { field: error.field }),
-      ...(error.cause === undefined ? {} : { cause: error.cause }),
-    });
-  }
-
-  throw error;
-}
-
-function throwNativeError(error: unknown, path: string): never {
-  const message = nativeMessage(error);
-
-  if (POISON_MARKER.test(message)) {
-    throw new OkfError("ERR_OKF_INDEX_UNUSABLE", path);
-  }
-
-  const sanitized = message.replace(NATIVE_MARKER, "").trim();
-  throw INVALID_SEARCH_OPTIONS_MARKER.test(message)
-    ? new TypeError(sanitized)
-    : new Error(sanitized || "Native OKF search failed");
-}
-
-function nativeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function snapshotInput(input: OkfDocumentInput): OkfDocumentInput {
+  return { path: input.path, markdown: input.markdown };
 }
 
 function copyDiagnostics(

@@ -199,12 +199,12 @@ describe("friendly root lifecycle", () => {
     }]);
     const prototype = NativeOkfSearch.prototype;
     const originals = {
-      ingest: prototype.ingestPrepared,
+      ingest: prototype.ingestRaw,
       search: prototype.search,
       stats: prototype.indexStats,
       types: prototype.listTypes,
       degraded: prototype.listDegradedDocuments,
-      remove: prototype.removeDocument,
+      remove: prototype.removePath,
     };
     const calls = {
       ingest: 0,
@@ -215,9 +215,9 @@ describe("friendly root lifecycle", () => {
       remove: 0,
     };
 
-    prototype.ingestPrepared = function () {
+    prototype.ingestRaw = function () {
       calls.ingest += 1;
-      throw new Error("[ERR_OKF_INDEX_UNUSABLE] injected native failure");
+      throw Object.assign(new Error("[ERR_OKF_INDEX_UNUSABLE] injected native failure"), { path: "failed/mutation.md" });
     };
     prototype.search = function (...args) {
       calls.search += 1;
@@ -235,7 +235,7 @@ describe("friendly root lifecycle", () => {
       calls.degraded += 1;
       return originals.degraded.call(this);
     };
-    prototype.removeDocument = function (...args) {
+    prototype.removePath = function (...args) {
       calls.remove += 1;
       return originals.remove.apply(this, args);
     };
@@ -274,12 +274,12 @@ describe("friendly root lifecycle", () => {
         remove: 0,
       });
     } finally {
-      prototype.ingestPrepared = originals.ingest;
+      prototype.ingestRaw = originals.ingest;
       prototype.search = originals.search;
       prototype.indexStats = originals.stats;
       prototype.listTypes = originals.types;
       prototype.listDegradedDocuments = originals.degraded;
-      prototype.removeDocument = originals.remove;
+      prototype.removePath = originals.remove;
     }
   });
 

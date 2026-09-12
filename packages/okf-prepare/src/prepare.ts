@@ -1,9 +1,9 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { parse } from "yaml";
 
 import { PrepareError } from "./errors.js";
 import { normalizeOkfDocumentIdentity } from "./identity.js";
 import { isOkfStatus } from "./vocabulary.js";
+import { parseOkfYaml } from "./yaml.js";
 
 import type { RootContent } from "mdast";
 import type { Node, Position } from "unist";
@@ -197,7 +197,7 @@ function analyzeDocument(
   let parsed: unknown;
 
   try {
-    parsed = parse(frontmatter.yaml);
+    parsed = parseOkfYaml(frontmatter.yaml);
   } catch {
     return fatalAnalysis([diagnostic("ERR_OKF_PARSE", path)]);
   }
