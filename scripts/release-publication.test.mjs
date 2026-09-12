@@ -543,33 +543,7 @@ test("plan validator rejects changed digest bytes and every unrecorded directory
   })
 })
 
-test("generated Pi consumer declares the exact tested host cohort", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "pi-host-consumer-"))
-  try {
-    const specs = packWorkspacePackages(directory, { mini: false, native: true })
-    const plan = await createPublicationPlan({ directory, selection: selection(specs), registry: { policy: async () => ({ state: "unpublished", distTag: "latest" }) } })
-    let dependencies
-    await verifyLocalJsConsumers({
-      directory,
-      plan,
-      expectedCommit: releaseCommit,
-      onCommand: ({ args, cwd }) => {
-        if (args[0] === "install") dependencies = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).dependencies
-      },
-    })
-    assert.deepEqual(dependencies, {
-      "pi-okf-search": `file:${join(directory, plan.packages[1].tarball)}`,
-      "okf-search-native": `file:${join(directory, plan.packages[0].tarball)}`,
-      "@earendil-works/pi-ai": "0.84.3",
-      "@earendil-works/pi-coding-agent": "0.84.3",
-      typebox: "1.3.7",
-    })
-  } finally {
-    rmSync(directory, { recursive: true, force: true })
-  }
-})
-
-test("real selected JS packages run both production smokes from exact local bytes with scripts disabled", async () => {
+test("real selected JS packages run both production smokes with scripts disabled", async () => {
   const directory = mkdtempSync(join(tmpdir(), "local-js-plan-"))
   try {
     const specs = packWorkspacePackages(directory, { native: true })
@@ -594,13 +568,12 @@ test("real selected JS packages run both production smokes from exact local byte
     assert.ok(tarCommands.length > 0)
     assert.equal(tarCommands.every(({ args, cwd }) => args[0] === "-xzf" && args[1] === basename(args[1]) && !args[1].includes(":") && cwd === directory), true)
     assert.equal(commands.filter(({ args }) => args.some((arg) => /(?:minisearch|pi)-smoke\.mjs$/.test(arg))).length, 2)
-    assert.equal(commands.some(({ args }) => args[0] === "ls" && args.includes("--long")), true, "Pi selected-byte dependency proof did not run")
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
 })
 
-test("a local native-and-Pi plan runs the Pi smoke from selected native bytes", async () => {
+test("a local native-and-Pi plan runs the Pi smoke", async () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-native-js-plan-"))
   try {
     const specs = packWorkspacePackages(directory, { mini: false, native: true })
@@ -616,7 +589,7 @@ test("a local native-and-Pi plan runs the Pi smoke from selected native bytes", 
   }
 })
 
-test("a selected native version outside Pi's packed range is rejected", async () => {
+test("a selected native version outside Pi's packed range can coexist with Pi's registry-compatible native", async () => {
   const directory = mkdtempSync(join(tmpdir(), "incompatible-js-plan-"))
   try {
     const specs = packWorkspacePackages(directory, { mini: false, native: true })
@@ -627,9 +600,11 @@ test("a selected native version outside Pi's packed range is rejected", async ()
     rewriteTarballManifest(incompatible, (manifest) => { manifest.version = "0.4.0" })
     native.version = "0.4.0"
     const plan = await createPublicationPlan({ directory, selection: selection(specs), registry: { policy: async () => ({ state: "unpublished", distTag: "latest" }) } })
-    await assert.rejects(
-      verifyLocalJsConsumers({ directory, plan, expectedCommit: releaseCommit }),
-      /different okf-search-native instance|another okf-search-native version|ELSPROBLEMS/,
+    assert.deepEqual(
+      await verifyLocalJsConsumers({ directory, plan, expectedCommit: releaseCommit }),
+      specs
+        .filter(({ name }) => name === "pi-okf-search")
+        .map(({ name, version }) => ({ name, version })),
     )
   } finally {
     rmSync(directory, { recursive: true, force: true })

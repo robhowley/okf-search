@@ -1498,6 +1498,7 @@ async function inspectPiManifest(
   assert.deepEqual(manifest.peerDependencies, {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     typebox: "*",
   });
   assert.equal(
@@ -1798,6 +1799,7 @@ async function preparePiConsumer(
       "pi-okf-search": `file:../tarballs/${basename(piTarball)}`,
       "@earendil-works/pi-ai": "0.84.3",
       "@earendil-works/pi-coding-agent": "0.84.3",
+      "@earendil-works/pi-tui": "0.84.3",
       typebox: "1.3.7",
     },
   });
