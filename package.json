@@ -5,22 +5,19 @@
   "packageManager": "pnpm@11.22.0",
   "scripts": {
     "build": "pnpm -r build",
-    "package:check": "pnpm install --frozen-lockfile && pnpm build && pnpm --filter okf-search-native check:rust && pnpm -r typecheck && pnpm -r test && pnpm test:demo && pnpm test:release-workflow && node scripts/check-package.mjs",
-    "test": "pnpm build && pnpm -r test && pnpm test:demo",
+    "package:check": "pnpm install --frozen-lockfile && pnpm build && pnpm --filter okf-search-native check:rust && pnpm test:prepare-core && pnpm -r typecheck && pnpm -r test && pnpm test:demo && pnpm test:release-workflow && node scripts/check-package.mjs",
+    "test": "pnpm build && pnpm test:prepare-core && pnpm -r test && pnpm test:demo",
     "test:demo": "vitest run test/demo.test.ts",
-    "test:prepare-oracle": "pnpm --filter @okf-internal/prepare test:oracle",
-    "benchmark:prepare-baseline": "pnpm --filter @okf-internal/prepare benchmark",
+    "test:prepare-core": "cargo test --locked --manifest-path crates/okf-prepare-core/Cargo.toml",
     "test:release-workflow": "node --test scripts/release-publication.test.mjs packages/okf-search-native/tests/ci-contract.test.mjs packages/okf-search-native/tests/verify-release-artifacts.test.mjs",
     "typecheck": "pnpm build && pnpm -r typecheck"
   },
   "devDependencies": {
-    "@okf-internal/prepare": "workspace:*",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@types/node": "^26.2.0",
     "@typescript/typescript6": "^6.0.2",
     "esbuild": "^0.28.2",
     "rollup": "^4.63.1",
-    "rollup-plugin-dts": "^6.5.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

@@ -147,16 +147,4 @@ impl Analysis {
             },
         }
     }
-
-    #[must_use]
-    pub fn validation(&self) -> Validation {
-        self.clone().into_validation()
-    }
-
-    #[must_use]
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        match self {
-            Self::Fatal { diagnostics } | Self::Accepted { diagnostics, .. } => diagnostics,
-        }
-    }
 }

@@ -104,7 +104,7 @@ test("root declarations are identical and contain no private package reference",
 
   assert.equal(declarations[0], declarations[1]);
   assert.equal(declarations[1], declarations[2]);
-  assert.doesNotMatch(declarations[0], /@okf-internal\/prepare|workspace:/);
+  assert.doesNotMatch(declarations[0], /@okf-internal\/|workspace:/);
 });
 
 test("ESM and CommonJS resolve the root and prepared subpath", async () => {

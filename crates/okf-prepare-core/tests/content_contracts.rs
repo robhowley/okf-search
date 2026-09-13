@@ -91,6 +91,26 @@ fn heading_text_and_untitled_fallback_drive_paths_and_slugs() {
 }
 
 #[test]
+fn inline_heading_text_preserves_adjacency_in_paths_and_ids() {
+    for (body, heading, id) in [
+        ("## alpha**beta**gamma", "alphabetagamma", "doc#alphabetagamma"),
+        ("## Alpha **beta** gamma", "Alpha beta gamma", "doc#alpha-beta-gamma"),
+    ] {
+        let sections = project_sections("doc", "Title", body, 4);
+        assert_eq!(sections[0].heading_path, heading);
+        assert_eq!(sections[0].id, id);
+    }
+}
+
+#[test]
+fn fenced_code_ends_on_the_last_content_line() {
+    for (body, end_line) in [("```\none\n", 5), ("```\none", 5), ("```\none\n```\n", 6)] {
+        let sections = project_sections("doc", "Title", body, 4);
+        assert_eq!((sections[0].start_line, sections[0].end_line), (4, end_line));
+    }
+}
+
+#[test]
 fn text_normalizes_all_supported_line_endings_without_changing_offsets() {
     for newline in ["\n", "\r\n", "\r"] {
         let body = format!("# Heading{newline}{newline}first{newline}{newline}second");
