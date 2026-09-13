@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/robhowley/okf-search/compare/pi-okf-search-v0.5.0...pi-okf-search-v0.6.0) (2026-09-13)
+
+
+### Features
+
+* **pi-okf-search:** show tool call arguments ([#80](https://github.com/robhowley/okf-search/issues/80)) ([9901fb1](https://github.com/robhowley/okf-search/commit/9901fb119e0c670eb9046705179e8f65b79d9e9f))
+
 ## [0.5.0](https://github.com/robhowley/okf-search/compare/pi-okf-search-v0.4.0...pi-okf-search-v0.5.0) (2026-09-06)
 
 
