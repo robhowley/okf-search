@@ -93,8 +93,16 @@ fn heading_text_and_untitled_fallback_drive_paths_and_slugs() {
 #[test]
 fn inline_heading_text_preserves_adjacency_in_paths_and_ids() {
     for (body, heading, id) in [
-        ("## alpha**beta**gamma", "alphabetagamma", "doc#alphabetagamma"),
-        ("## Alpha **beta** gamma", "Alpha beta gamma", "doc#alpha-beta-gamma"),
+        (
+            "## alpha**beta**gamma",
+            "alphabetagamma",
+            "doc#alphabetagamma",
+        ),
+        (
+            "## Alpha **beta** gamma",
+            "Alpha beta gamma",
+            "doc#alpha-beta-gamma",
+        ),
     ] {
         let sections = project_sections("doc", "Title", body, 4);
         assert_eq!(sections[0].heading_path, heading);
@@ -106,7 +114,10 @@ fn inline_heading_text_preserves_adjacency_in_paths_and_ids() {
 fn fenced_code_ends_on_the_last_content_line() {
     for (body, end_line) in [("```\none\n", 5), ("```\none", 5), ("```\none\n```\n", 6)] {
         let sections = project_sections("doc", "Title", body, 4);
-        assert_eq!((sections[0].start_line, sections[0].end_line), (4, end_line));
+        assert_eq!(
+            (sections[0].start_line, sections[0].end_line),
+            (4, end_line)
+        );
     }
 }
 
@@ -119,6 +130,113 @@ fn text_normalizes_all_supported_line_endings_without_changing_offsets() {
         assert_eq!(sections[0].text, "first\n\nsecond");
         assert_eq!((sections[0].start_line, sections[0].end_line), (8, 12));
     }
+}
+
+#[test]
+fn chunk_text_normalization_preserves_unicode_trim_and_internal_spacing() {
+    for (body, text, end_line) in [
+        ("\u{00a0}\tα\r\n\rβ\n\u{2003}", "α\n\nβ", 11),
+        ("\u{00a0}\tα\n\nβ\n\u{2003}", "α\n\nβ", 11),
+        ("a\r\r\nb", "a\n\nb", 10),
+        ("a\tb\r\nc\u{2003}d", "a\tb\nc\u{2003}d", 9),
+        ("\u{00a0}\t\u{2003}", "", 8),
+    ] {
+        assert_eq!(
+            project_sections("doc", "Title", body, 8),
+            vec![PreparedSection {
+                id: "doc#root".into(),
+                heading_path: "Title".into(),
+                text: text.into(),
+                start_line: 8,
+                end_line,
+            }],
+            "body: {body:?}"
+        );
+    }
+}
+
+#[test]
+fn mixed_newlines_keep_source_bounds_and_interblock_gaps() {
+    for body in ["# H\r\n\r\nα\r\rβ\n", "# H\r\n\r\nα\r\rβ"] {
+        assert_eq!(
+            project_sections("doc", "Title", body, 8),
+            vec![PreparedSection {
+                id: "doc#h".into(),
+                heading_path: "H".into(),
+                text: "α\n\nβ".into(),
+                start_line: 8,
+                end_line: 12,
+            }],
+            "body: {body:?}"
+        );
+    }
+}
+
+#[test]
+fn borrowed_blocks_preserve_parser_and_chunk_boundaries() {
+    let paragraph = |words: usize, term: &str| {
+        std::iter::once(term)
+            .chain(std::iter::repeat_n("word", words - 1))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    for (first_words, first_group) in [
+        (499, vec!["first", "bridge", "---"]),
+        (500, vec!["first"]),
+        (501, vec!["first"]),
+    ] {
+        let first = paragraph(first_words, &format!("first{first_words}"));
+        let third = paragraph(300, "third");
+        let fourth = paragraph(300, "fourth");
+        let body = format!("{first}\r\n\r\nbridge\r\r---\n\n{third}\r\n\r\n{fourth}");
+        let sections = project_sections("blocks", "Title", &body, 30);
+
+        assert_eq!(sections.len(), 3, "first words: {first_words}");
+        assert_eq!(sections[0].id, "blocks#root--part-1");
+        assert_eq!(
+            sections[0].text,
+            first_group
+                .iter()
+                .map(|block| if *block == "first" {
+                    first.as_str()
+                } else {
+                    *block
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        );
+        assert_eq!(sections[0].start_line, 30);
+        assert_eq!(
+            sections[0].end_line,
+            if first_words == 499 { 34 } else { 30 }
+        );
+
+        let second_text = if first_words == 499 {
+            third.clone()
+        } else {
+            format!("bridge\n\n---\n\n{third}")
+        };
+        let second_start = if first_words == 499 { 36 } else { 32 };
+        assert_eq!(sections[1].id, "blocks#root--part-2");
+        assert_eq!(sections[1].text, second_text);
+        assert_eq!(
+            (sections[1].start_line, sections[1].end_line),
+            (second_start, 36)
+        );
+        assert_eq!(sections[2].id, "blocks#root--part-3");
+        assert_eq!(sections[2].text, fourth);
+        assert_eq!((sections[2].start_line, sections[2].end_line), (38, 38));
+    }
+
+    let source_based =
+        "````\r\na--b __under_score__ 日本語 12.5\r\n````\r\n\r\n- list_item\r\n\r\n> quoted\r\n";
+    let source_sections = project_sections("source", "Title", source_based, 20);
+    assert_eq!(source_sections.len(), 1);
+    assert_eq!(
+        source_sections[0].text,
+        "````\na--b __under_score__ 日本語 12.5\n````\n\n- list_item\n\n> quoted"
+    );
 }
 
 #[test]

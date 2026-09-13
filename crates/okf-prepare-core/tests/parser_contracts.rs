@@ -158,6 +158,73 @@ fn markdown_heading_text_comes_from_comrak_inline_nodes() {
 }
 
 #[test]
+fn markdown_owned_projection_retains_original_newlines_and_outlives_input() {
+    let cases = [
+        (
+            "# Heading\n\nα\nβ\n> quote",
+            ["# Heading", "α\nβ", "> quote"],
+        ),
+        (
+            "# Heading\n\nα\nβ\n> quote\n",
+            ["# Heading", "α\nβ", "> quote"],
+        ),
+        (
+            "# Heading\r\n\r\nα\r\nβ\r\n> quote",
+            ["# Heading", "α\r\nβ", "> quote"],
+        ),
+        (
+            "# Heading\r\n\r\nα\r\nβ\r\n> quote\r\n",
+            ["# Heading", "α\r\nβ", "> quote"],
+        ),
+        (
+            "# Heading\r\rα\rβ\r> quote",
+            ["# Heading", "α\rβ", "> quote"],
+        ),
+        (
+            "# Heading\r\rα\rβ\r> quote\r",
+            ["# Heading", "α\rβ", "> quote"],
+        ),
+        (
+            "# Heading\r\n\r\nα\rβ\n> quote",
+            ["# Heading", "α\rβ", "> quote"],
+        ),
+        (
+            "# Heading\r\n\r\nα\rβ\n> quote\n",
+            ["# Heading", "α\rβ", "> quote"],
+        ),
+    ];
+
+    for (source, expected_sources) in cases {
+        let blocks = {
+            let input = source.to_owned();
+            project(&input)
+        };
+
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block.source.as_str())
+                .collect::<Vec<_>>(),
+            expected_sources,
+            "source: {source:?}"
+        );
+        assert_heading(&blocks[0], 1, "Heading", 1, 1, "# Heading");
+        assert_eq!((blocks[1].start_line, blocks[1].end_line), (3, 4));
+        assert_eq!((blocks[2].start_line, blocks[2].end_line), (5, 5));
+        assert!(matches!(blocks[1].kind, BlockKind::Content));
+        assert!(matches!(blocks[2].kind, BlockKind::Content));
+    }
+
+    for source in ["", "   \n\n", "\r\n\t"] {
+        let blocks = {
+            let input = source.to_owned();
+            project(&input)
+        };
+        assert!(blocks.is_empty(), "source: {source:?}");
+    }
+}
+
+#[test]
 fn prepare_errors_are_rust_owned_domain_fields() {
     let parse = PrepareError::parse("notes/example.md");
     assert_eq!(parse.code, "ERR_OKF_PARSE");
