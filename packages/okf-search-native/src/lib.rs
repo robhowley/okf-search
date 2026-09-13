@@ -28,7 +28,9 @@ use tantivy::schema::{
     FAST, Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument,
     TextFieldIndexing, TextOptions, Value,
 };
-use tantivy::tokenizer::{LowerCaser, SimpleTokenizer, TextAnalyzer, TokenStream};
+use tantivy::tokenizer::{
+    LowerCaser, PreTokenizedString, SimpleTokenizer, TextAnalyzer, TokenStream,
+};
 use tantivy::{
     DocAddress, DocSet, Index, IndexReader, IndexSettings, IndexWriter, ReloadPolicy, Score, Term,
 };
@@ -1470,13 +1472,47 @@ fn validate_document(document: &PreparedDocument) -> Result<(), EngineError> {
     Ok(())
 }
 
+struct DocumentMetadata {
+    title: PreTokenizedString,
+    document_type: PreTokenizedString,
+    resource: PreTokenizedString,
+    description: PreTokenizedString,
+    sources: PreTokenizedString,
+    tags: Vec<PreTokenizedString>,
+}
+
+fn pre_tokenize(analyzer: &mut TextAnalyzer, text: &str) -> PreTokenizedString {
+    let mut stream = analyzer.token_stream(text);
+    let mut tokens = Vec::new();
+    while stream.advance() {
+        tokens.push(stream.token().clone());
+    }
+    PreTokenizedString {
+        text: text.to_owned(),
+        tokens,
+    }
+}
+
 fn add_document(
     writer: &IndexWriter,
     fields: &Fields,
     document: &PreparedDocument,
 ) -> Result<(), EngineError> {
+    let mut analyzer = analyzer();
+    let metadata = DocumentMetadata {
+        title: pre_tokenize(&mut analyzer, &document.title),
+        document_type: pre_tokenize(&mut analyzer, &document.document_type),
+        resource: pre_tokenize(&mut analyzer, &document.resource),
+        description: pre_tokenize(&mut analyzer, &document.description),
+        sources: pre_tokenize(&mut analyzer, &document.source_text),
+        tags: document
+            .tags
+            .iter()
+            .map(|tag| pre_tokenize(&mut analyzer, tag))
+            .collect(),
+    };
     for section in &document.sections {
-        add_section(writer, fields, document, section)?;
+        add_section(writer, fields, document, section, &metadata)?;
     }
     Ok(())
 }
@@ -1486,6 +1522,7 @@ fn add_section(
     fields: &Fields,
     document: &PreparedDocument,
     section: &PreparedSection,
+    metadata: &DocumentMetadata,
 ) -> Result<(), EngineError> {
     // `validate_document` runs before storage construction in every caller.
     let start_line = section.start_line as u32;
@@ -1495,12 +1532,12 @@ fn add_section(
     doc.add_text(fields.section_id, &section.section_id);
     doc.add_text(fields.document_id, &document.document_id);
     doc.add_text(fields.conformance, &document.conformance);
-    doc.add_text(fields.title, &document.title);
+    doc.add_pre_tokenized_text(fields.title, metadata.title.clone());
     doc.add_text(fields.path, &document.path);
-    doc.add_text(fields.type_text, &document.document_type);
+    doc.add_pre_tokenized_text(fields.type_text, metadata.document_type.clone());
     doc.add_text(fields.type_exact, &document.document_type);
-    for tag in &document.tags {
-        doc.add_text(fields.tags_text, tag);
+    for (tag, tokens) in document.tags.iter().zip(&metadata.tags) {
+        doc.add_pre_tokenized_text(fields.tags_text, tokens.clone());
         doc.add_text(fields.tag_exact, tag);
     }
     if let Some(status) = &document.status {
@@ -1518,10 +1555,10 @@ fn add_section(
     if let Some(tier) = &document.trust_tier {
         doc.add_text(fields.trust_tier, tier);
     }
-    doc.add_text(fields.resource, &document.resource);
+    doc.add_pre_tokenized_text(fields.resource, metadata.resource.clone());
     doc.add_text(fields.heading, &section.heading_path);
-    doc.add_text(fields.description, &document.description);
-    doc.add_text(fields.sources, &document.source_text);
+    doc.add_pre_tokenized_text(fields.description, metadata.description.clone());
+    doc.add_pre_tokenized_text(fields.sources, metadata.sources.clone());
     doc.add_text(fields.body, &section.text);
     doc.add_u64(fields.start_line, start_line as u64);
     doc.add_u64(fields.end_line, end_line as u64);
@@ -1854,6 +1891,402 @@ pub mod poison_fixture;
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn add_raw_document(
+        writer: &IndexWriter,
+        fields: &Fields,
+        document: &PreparedDocument,
+    ) -> Result<(), EngineError> {
+        for section in &document.sections {
+            add_raw_section(writer, fields, document, section)?;
+        }
+        Ok(())
+    }
+
+    fn add_raw_section(
+        writer: &IndexWriter,
+        fields: &Fields,
+        document: &PreparedDocument,
+        section: &PreparedSection,
+    ) -> Result<(), EngineError> {
+        // `validate_document` runs before storage construction in every caller.
+        let start_line = section.start_line as u32;
+        let end_line = section.end_line as u32;
+
+        let mut doc = TantivyDocument::default();
+        doc.add_text(fields.section_id, &section.section_id);
+        doc.add_text(fields.document_id, &document.document_id);
+        doc.add_text(fields.conformance, &document.conformance);
+        doc.add_text(fields.title, &document.title);
+        doc.add_text(fields.path, &document.path);
+        doc.add_text(fields.type_text, &document.document_type);
+        doc.add_text(fields.type_exact, &document.document_type);
+        for tag in &document.tags {
+            doc.add_text(fields.tags_text, tag);
+            doc.add_text(fields.tag_exact, tag);
+        }
+        if let Some(status) = &document.status {
+            doc.add_text(fields.status, status);
+        }
+        if let Some(epoch) = document.stale_after_epoch {
+            doc.add_i64(fields.stale_after_epoch, epoch as i64);
+        }
+        // The positive marker is sufficient: missing means unclassified. Avoiding
+        // a posting for the overwhelmingly uninteresting false value keeps this
+        // filter field compact.
+        if document.staleness_classified {
+            doc.add_u64(fields.staleness_classified, 1);
+        }
+        if let Some(tier) = &document.trust_tier {
+            doc.add_text(fields.trust_tier, tier);
+        }
+        doc.add_text(fields.resource, &document.resource);
+        doc.add_text(fields.heading, &section.heading_path);
+        doc.add_text(fields.description, &document.description);
+        doc.add_text(fields.sources, &document.source_text);
+        doc.add_text(fields.body, &section.text);
+        doc.add_u64(fields.start_line, start_line as u64);
+        doc.add_u64(fields.end_line, end_line as u64);
+        writer.add_document(doc)?;
+        Ok(())
+    }
+
+    impl Engine {
+        fn new_raw(documents: Vec<PreparedDocument>) -> Result<Self, EngineError> {
+            validate_set(&documents)?;
+            let (schema, fields) = schema();
+            let ram_directory = RamDirectory::create();
+            let index = Index::create(ram_directory.clone(), schema, IndexSettings::default())?;
+            index.tokenizers().register(TOKENIZER, analyzer());
+            let mut writer = index.writer(WRITER_HEAP_BYTES)?;
+            let mut states = BTreeMap::new();
+            for document in &documents {
+                add_raw_document(&writer, &fields, document)?;
+                states.insert(document.document_id.clone(), DocumentState::from(document));
+            }
+            writer.commit()?;
+            let reader: IndexReader = index
+                .reader_builder()
+                .reload_policy(ReloadPolicy::Manual)
+                .try_into()?;
+            reader.reload()?;
+            Ok(Self {
+                _index: index,
+                ram_directory,
+                reader,
+                writer,
+                fields,
+                documents: states,
+                poisoned: Mutex::new(None),
+                #[cfg(test)]
+                count_results: std::collections::VecDeque::new(),
+                #[cfg(test)]
+                query_results: Mutex::new(std::collections::VecDeque::new()),
+            })
+        }
+
+        fn ingest_raw_reference(&mut self, document: PreparedDocument) -> Result<(), EngineError> {
+            self.usable()?;
+            validate_document(&document)?;
+
+            if let Some(existing) = self.documents.get(&document.document_id)
+                && existing.path != document.path
+            {
+                return Err(EngineError::Invalid(format!(
+                    "replacement documentId `{}` changed path from `{}` to `{}`",
+                    document.document_id, existing.path, document.path
+                )));
+            }
+            if let Some(conflict) = self.documents.values().find(|state| {
+                state.document_id != document.document_id && state.path == document.path
+            }) {
+                return Err(EngineError::Invalid(format!(
+                    "path `{}` is already owned by documentId `{}`",
+                    document.path, conflict.document_id
+                )));
+            }
+            for section in &document.sections {
+                if let Some(conflict) = self.documents.values().find(|state| {
+                    state.document_id != document.document_id
+                        && state.section_ids.contains(&section.section_id)
+                }) {
+                    return Err(EngineError::Invalid(format!(
+                        "sectionId `{}` is already owned by documentId `{}`",
+                        section.section_id, conflict.document_id
+                    )));
+                }
+            }
+
+            let previous = self
+                .documents
+                .get(&document.document_id)
+                .map_or(0, |state| state.section_count);
+            self.verify_count(&document.document_id, previous)?;
+
+            self.writer.delete_term(Term::from_field_text(
+                self.fields.document_id,
+                &document.document_id,
+            ));
+            if let Err(error) = add_raw_document(&self.writer, &self.fields, &document) {
+                return self.poison(format!(
+                    "replacement `{}` could not be staged: {error}",
+                    document.document_id
+                ));
+            }
+            self.commit(&format!("replace `{}`", document.document_id))?;
+            let count = document.sections.len();
+            self.documents
+                .insert(document.document_id.clone(), DocumentState::from(&document));
+            self.verify_post_commit_count(&document.document_id, count)
+        }
+    }
+
+    // Frozen raw insertion/lifecycle above keeps the reference independent of the
+    // candidate's metadata construction; neither path changes writer settings.
+    type SectionTerm = (u32, Vec<u8>, String);
+
+    #[derive(Debug, PartialEq)]
+    struct MetadataSnapshot {
+        stored: BTreeMap<String, Vec<(u32, String)>>,
+        postings: BTreeMap<SectionTerm, (u32, Vec<u32>)>,
+        norms: BTreeMap<(u32, String), u8>,
+        tokens: BTreeMap<u32, u64>,
+        doc_freqs: BTreeMap<(u32, Vec<u8>), u32>,
+    }
+
+    fn metadata_snapshot(engine: &Engine) -> MetadataSnapshot {
+        use tantivy::postings::Postings;
+        use tantivy::{DocSet, Document, TERMINATED};
+        let mut snapshot = MetadataSnapshot {
+            stored: BTreeMap::new(),
+            postings: BTreeMap::new(),
+            norms: BTreeMap::new(),
+            tokens: BTreeMap::new(),
+            doc_freqs: BTreeMap::new(),
+        };
+        let searcher = engine.reader.searcher();
+        for (ordinal, segment) in searcher.segment_readers().iter().enumerate() {
+            let mut ids = BTreeMap::new();
+            for doc_id in 0..segment.max_doc() {
+                if segment.is_deleted(doc_id) {
+                    continue;
+                }
+                let doc: TantivyDocument = searcher
+                    .doc(DocAddress::new(ordinal as u32, doc_id))
+                    .unwrap();
+                let id = required_text(&doc, engine.fields.section_id, "section_id").unwrap();
+                let values = doc
+                    .iter_fields_and_values()
+                    .map(|(field, value)| (field.field_id(), format!("{:?}", value.as_value())))
+                    .collect();
+                snapshot.stored.insert(id.clone(), values);
+                ids.insert(doc_id, id);
+            }
+            for field in [
+                engine.fields.title,
+                engine.fields.type_text,
+                engine.fields.resource,
+                engine.fields.description,
+                engine.fields.sources,
+                engine.fields.tags_text,
+                engine.fields.heading,
+                engine.fields.body,
+            ] {
+                let inverted = segment.inverted_index(field).unwrap();
+                *snapshot.tokens.entry(field.field_id()).or_default() +=
+                    inverted.total_num_tokens();
+                let norms = segment.get_fieldnorms_reader(field).unwrap();
+                for (&doc_id, id) in &ids {
+                    snapshot
+                        .norms
+                        .insert((field.field_id(), id.clone()), norms.fieldnorm_id(doc_id));
+                }
+                let mut terms = inverted.terms().stream().unwrap();
+                while terms.advance() {
+                    let key = (field.field_id(), terms.key().to_vec());
+                    *snapshot.doc_freqs.entry(key.clone()).or_default() += terms.value().doc_freq;
+                    let mut postings = inverted
+                        .read_postings_from_terminfo(
+                            terms.value(),
+                            IndexRecordOption::WithFreqsAndPositions,
+                        )
+                        .unwrap();
+                    while postings.doc() != TERMINATED {
+                        if let Some(id) = ids.get(&postings.doc()) {
+                            let mut positions = Vec::new();
+                            postings.positions(&mut positions);
+                            snapshot.postings.insert(
+                                (key.0, key.1.clone(), id.clone()),
+                                (postings.term_freq(), positions),
+                            );
+                        }
+                        postings.advance();
+                    }
+                }
+            }
+        }
+        snapshot
+    }
+
+    fn assert_metadata_parity(raw: &Engine, cached: &Engine) {
+        assert_eq!(metadata_snapshot(raw), metadata_snapshot(cached));
+        let fields = [
+            "resource",
+            "title",
+            "heading",
+            "description",
+            "tags",
+            "type",
+            "sources",
+            "body",
+        ];
+        for selected in fields
+            .iter()
+            .map(|field| vec![*field])
+            .chain(std::iter::once(fields.to_vec()))
+        {
+            for query in [
+                "memory",
+                "memory architecture",
+                "MEMORY café",
+                "cafe",
+                "mémoire",
+                "memo",
+                "memroy",
+                "note",
+                "source",
+                "alpha beta",
+                "missingxyz",
+            ] {
+                for mode in ["any", "all"] {
+                    for fuzzy in [false, true] {
+                        for limit in [1.0, 3.0, 100.0] {
+                            for filtered in [false, true] {
+                                let mut options = search_options(&selected, mode);
+                                options.limit = Some(limit);
+                                options.fuzzy = Some(Either::A(fuzzy));
+                                if filtered {
+                                    options.where_filter = Some(SearchWhere {
+                                        types: Some(vec!["Note".into()]),
+                                        tags_any: Some(vec!["alpha".into()]),
+                                        statuses: Some(vec!["stable".into()]),
+                                        trust_tiers: Some(vec!["human-reviewed".into()]),
+                                        stale: None,
+                                        conformance: Some(vec!["strict".into()]),
+                                    });
+                                    options.boost = Some(SearchBoost {
+                                        title: Some(3.0),
+                                        body: Some(0.5),
+                                        resource: None,
+                                        heading: None,
+                                        description: None,
+                                        tags: Some(2.0),
+                                        document_type: None,
+                                        sources: None,
+                                    });
+                                }
+                                let a = raw.search(query, Some(options.clone())).unwrap();
+                                let b = cached.search(query, Some(options)).unwrap();
+                                assert_eq!(
+                                    a.iter().map(|hit| hit.score.to_bits()).collect::<Vec<_>>(),
+                                    b.iter().map(|hit| hit.score.to_bits()).collect::<Vec<_>>(),
+                                    "{query} {selected:?}"
+                                );
+                                // Debug includes every SearchHit field, in returned order.
+                                assert_eq!(
+                                    format!("{a:?}"),
+                                    format!("{b:?}"),
+                                    "{query} {selected:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pretokenized_metadata_matches_raw_storage_postings_and_search_through_mutations() {
+        let mut multi = document(section("multi", "memory architecture café alpha beta"));
+        multi.title = "MEMORY memory Café CAFÉ cafe\u{301} MéMoIrE".into();
+        multi.tags = ["alpha", "", "beta", "alpha beta", "alpha", "!!!"]
+            .map(str::to_owned)
+            .to_vec();
+        multi.source_text = "SOURCE mémoire".into();
+        multi.description = format!(
+            "memory {} {} {}",
+            "x".repeat(tantivy::tokenizer::MAX_TOKEN_LEN - 1),
+            "y".repeat(tantivy::tokenizer::MAX_TOKEN_LEN),
+            "z".repeat(tantivy::tokenizer::MAX_TOKEN_LEN + 1)
+        );
+        for n in 0..35 {
+            let mut next = section("multi", "memory architecture repeated memory");
+            next.section_id = format!("multi#{n}");
+            multi.sections.push(next);
+        }
+        let mut empty = document(section("empty", "memory"));
+        empty.title.clear();
+        empty.resource.clear();
+        empty.description.clear();
+        empty.tags = vec![String::new(), "!!!".into()];
+        let mut punctuation = document(section("punctuation", "memory"));
+        punctuation.title = "!!! ...".into();
+        punctuation.description.clear();
+        let mut docs = vec![multi.clone(), empty, punctuation];
+        for n in 0..14 {
+            docs.push(document(section(
+                &format!("tie-{n}"),
+                "memory architecture",
+            )));
+        }
+        let mut raw = Engine::new_raw(docs.clone()).unwrap();
+        let mut cached = Engine::new(docs).unwrap();
+        assert_metadata_parity(&raw, &cached);
+        let snapshot = metadata_snapshot(&cached);
+        assert_eq!(
+            snapshot.postings[&(
+                cached.fields.tags_text.field_id(),
+                b"beta".to_vec(),
+                "multi#root".into()
+            )]
+                .1,
+            vec![3, 6]
+        );
+        // A phrase crossing the empty value must retain its three-position gap.
+        for engine in [&raw, &cached] {
+            let field = engine.fields.tags_text;
+            let phrase = tantivy::query::PhraseQuery::new_with_offset(vec![
+                (0, Term::from_field_text(field, "alpha")),
+                (3, Term::from_field_text(field, "beta")),
+            ]);
+            assert_eq!(
+                engine.reader.searcher().search(&phrase, &Count).unwrap(),
+                36
+            );
+        }
+        let new = document(section("new", "memory source"));
+        raw.ingest_raw_reference(new.clone()).unwrap();
+        cached.ingest(new).unwrap();
+        assert_metadata_parity(&raw, &cached);
+        multi.title = "replacement memory".into();
+        multi.tags = vec!["beta".into(), "".into(), "alpha".into()];
+        multi.sections.truncate(2);
+        multi.description.clear();
+        multi.source_text.clear();
+        raw.ingest_raw_reference(multi.clone()).unwrap();
+        cached.ingest(multi).unwrap();
+        assert_metadata_parity(&raw, &cached);
+        assert!(raw.remove("new").unwrap());
+        assert!(cached.remove("new").unwrap());
+        assert_metadata_parity(&raw, &cached);
+        let mut invalid = document(section("invalid", "memory"));
+        invalid.sections.clear();
+        let before = metadata_snapshot(&cached);
+        assert!(raw.ingest_raw_reference(invalid.clone()).is_err());
+        assert!(cached.ingest(invalid).is_err());
+        assert_eq!(before, metadata_snapshot(&cached));
+        assert_metadata_parity(&raw, &cached);
+    }
 
     const BEFORE: i64 = 999;
     const FIRST_DEADLINE: i64 = 1_000;
