@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use finl_unicode::categories::CharacterCategories;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::markdown::{self, BlockKind, RootBlock};
+use crate::markdown::{self, BlockKind, BorrowedRootBlock};
 
 const MAX_SECTION_WORDS: usize = 800;
 const TARGET_CHUNK_WORDS: usize = 500;
@@ -28,8 +28,8 @@ pub fn project_sections(
     body: &str,
     body_start_line: usize,
 ) -> Vec<PreparedSection> {
-    let blocks = markdown::project(body);
-    let lines = line_ranges(body);
+    let lines = markdown::line_ranges(body);
+    let blocks = markdown::project_borrowed(body, &lines);
     let drafts = build_sections(blocks, title, body_start_line);
     let mut slug_counts = HashMap::new();
     let mut prepared = Vec::new();
@@ -60,11 +60,11 @@ pub fn project_sections(
     prepared
 }
 
-struct SectionDraft {
+struct SectionDraft<'a> {
     heading_path: String,
     slug: String,
     heading_line: Option<usize>,
-    blocks: Vec<RootBlock>,
+    blocks: Vec<BorrowedRootBlock<'a>>,
 }
 
 struct Chunk {
@@ -73,11 +73,11 @@ struct Chunk {
     end_line: usize,
 }
 
-fn build_sections(
-    blocks: Vec<RootBlock>,
+fn build_sections<'a>(
+    blocks: Vec<BorrowedRootBlock<'a>>,
     title: &str,
     body_start_line: usize,
-) -> Vec<SectionDraft> {
+) -> Vec<SectionDraft<'a>> {
     let mut result = Vec::new();
     let mut stack: Vec<(u8, String)> = Vec::new();
     let mut current = SectionDraft {
@@ -133,7 +133,7 @@ fn build_sections(
 }
 
 fn chunk_section(
-    section: &SectionDraft,
+    section: &SectionDraft<'_>,
     body: &str,
     lines: &[(usize, usize)],
     body_start_line: usize,
@@ -141,7 +141,7 @@ fn chunk_section(
     let words = section
         .blocks
         .iter()
-        .map(|block| word_count(&block.source))
+        .map(|block| word_count(block.source))
         .collect::<Vec<_>>();
     let total_words = words.iter().sum::<usize>();
 
@@ -186,7 +186,7 @@ fn chunk_section(
 }
 
 fn make_chunk(
-    section: &SectionDraft,
+    section: &SectionDraft<'_>,
     block_indices: &[usize],
     body: &str,
     lines: &[(usize, usize)],
@@ -224,46 +224,40 @@ fn source_between(
     start_line: usize,
     end_line: usize,
 ) -> String {
-    let Some(&(start, _)) = start_line.checked_sub(1).and_then(|line| lines.get(line)) else {
-        return String::new();
-    };
-    let Some(&(_, end)) = end_line.checked_sub(1).and_then(|line| lines.get(line)) else {
-        return String::new();
-    };
-
-    body[start..end]
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .trim()
-        .to_owned()
+    normalize_source(markdown::slice_lines(lines, start_line, end_line, body))
 }
 
-fn line_ranges(source: &str) -> Vec<(usize, usize)> {
-    let bytes = source.as_bytes();
-    let mut ranges = Vec::new();
-    let mut start = 0;
+fn normalize_source(source: &str) -> String {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if !trimmed.as_bytes().contains(&b'\r') {
+        return trimmed.to_owned();
+    }
+
+    let mut normalized = String::with_capacity(trimmed.len());
+    let bytes = trimmed.as_bytes();
+    let mut span_start = 0;
     let mut index = 0;
 
     while index < bytes.len() {
-        match bytes[index] {
-            b'\n' => {
-                ranges.push((start, index));
-                index += 1;
-                start = index;
-            }
-            b'\r' => {
-                ranges.push((start, index));
-                index += 1;
-                if bytes.get(index) == Some(&b'\n') {
-                    index += 1;
-                }
-                start = index;
-            }
-            _ => index += 1,
+        if bytes[index] != b'\r' {
+            index += 1;
+            continue;
         }
+
+        normalized.push_str(&trimmed[span_start..index]);
+        normalized.push('\n');
+        index += 1;
+        if bytes.get(index) == Some(&b'\n') {
+            index += 1;
+        }
+        span_start = index;
     }
-    ranges.push((start, source.len()));
-    ranges
+
+    normalized.push_str(&trimmed[span_start..]);
+    normalized
 }
 
 fn absolute_line(body_start_line: usize, body_line: usize) -> usize {
@@ -316,5 +310,23 @@ fn slug(value: &str) -> String {
         "section".to_owned()
     } else {
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_source;
+
+    #[test]
+    fn chunk_text_normalization_preserves_unicode_trim_and_internal_spacing() {
+        for (source, expected) in [
+            ("\u{00a0}\tα\r\n\rβ\n\u{2003}", "α\n\nβ"),
+            ("\u{00a0}\tα\n\nβ\n\u{2003}", "α\n\nβ"),
+            ("a\r\r\nb", "a\n\nb"),
+            ("a\tb\r\nc\u{2003}d", "a\tb\nc\u{2003}d"),
+            ("\u{00a0}\t\u{2003}", ""),
+        ] {
+            assert_eq!(normalize_source(source), expected, "source: {source:?}");
+        }
     }
 }

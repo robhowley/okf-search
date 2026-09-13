@@ -15,12 +15,34 @@ pub struct RootBlock {
     pub source: String,
 }
 
+pub(crate) struct BorrowedRootBlock<'a> {
+    pub(crate) kind: BlockKind,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) source: &'a str,
+}
+
 /// Project the root blocks consumed by OKF preparation.
 #[must_use]
 pub fn project(source: &str) -> Vec<RootBlock> {
+    let lines = line_ranges(source);
+    project_borrowed(source, &lines)
+        .into_iter()
+        .map(|block| RootBlock {
+            kind: block.kind,
+            start_line: block.start_line,
+            end_line: block.end_line,
+            source: block.source.to_owned(),
+        })
+        .collect()
+}
+
+pub(crate) fn project_borrowed<'a>(
+    source: &'a str,
+    lines: &[(usize, usize)],
+) -> Vec<BorrowedRootBlock<'a>> {
     let arena = Arena::new();
     let root = parse_document(&arena, source, &Options::default());
-    let lines = line_ranges(source);
 
     root.children()
         .map(|node| {
@@ -34,17 +56,17 @@ pub fn project(source: &str) -> Vec<RootBlock> {
                 text: node.collect_text(),
             });
 
-            RootBlock {
+            BorrowedRootBlock {
                 kind,
                 start_line: sourcepos.start.line,
                 end_line: sourcepos.end.line,
-                source: slice_lines(&lines, sourcepos.start.line, sourcepos.end.line, source),
+                source: slice_lines(lines, sourcepos.start.line, sourcepos.end.line, source),
             }
         })
         .collect()
 }
 
-fn line_ranges(source: &str) -> Vec<(usize, usize)> {
+pub(crate) fn line_ranges(source: &str) -> Vec<(usize, usize)> {
     let bytes = source.as_bytes();
     let mut ranges = Vec::new();
     let mut start = 0;
@@ -72,17 +94,48 @@ fn line_ranges(source: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
-fn slice_lines(
+pub(crate) fn slice_lines<'a>(
     lines: &[(usize, usize)],
     start_line: usize,
     end_line: usize,
-    source: &str,
-) -> String {
+    source: &'a str,
+) -> &'a str {
     let Some(&(start, _)) = start_line.checked_sub(1).and_then(|line| lines.get(line)) else {
-        return String::new();
+        return "";
     };
     let Some(&(_, end)) = end_line.checked_sub(1).and_then(|line| lines.get(line)) else {
-        return String::new();
+        return "";
     };
-    source[start..end].to_owned()
+    &source[start..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{line_ranges, slice_lines};
+
+    #[test]
+    fn shared_line_ranges_preserve_empty_and_terminal_lines() {
+        for (source, expected) in [
+            ("", vec![(0, 0)]),
+            ("a", vec![(0, 1)]),
+            ("a\n", vec![(0, 1), (2, 2)]),
+            ("a\r", vec![(0, 1), (2, 2)]),
+            ("a\r\n", vec![(0, 1), (3, 3)]),
+            ("a\r\nb\rc\n", vec![(0, 1), (3, 4), (5, 6), (7, 7)]),
+            ("a\n\n", vec![(0, 1), (2, 2), (3, 3)]),
+            ("\n\n", vec![(0, 0), (1, 1), (2, 2)]),
+        ] {
+            assert_eq!(line_ranges(source), expected, "source: {source:?}");
+            for (line, &(start, end)) in expected.iter().enumerate() {
+                assert_eq!(
+                    slice_lines(&expected, line + 1, line + 1, source),
+                    &source[start..end],
+                    "source: {source:?}, line: {}",
+                    line + 1
+                );
+            }
+            assert_eq!(slice_lines(&expected, 0, 1, source), "");
+            assert_eq!(slice_lines(&expected, 1, expected.len() + 1, source), "");
+        }
+    }
 }
