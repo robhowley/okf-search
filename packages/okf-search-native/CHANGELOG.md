@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.4.0...okf-search-native-v0.5.0) (2026-09-13)
+
+
+### Features
+
+* **okf-search-native:** move document preparation to Rust ([#81](https://github.com/robhowley/okf-search/issues/81)) ([1724f32](https://github.com/robhowley/okf-search/commit/1724f32477a8ff51492972055b9f9e051060dc5c))
+
 ## [0.4.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.3.4...okf-search-native-v0.4.0) (2026-09-09)
 
 
