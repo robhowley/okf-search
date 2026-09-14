@@ -24,19 +24,27 @@ addons that import symbols newer than `GLIBC_2.17`.
 
 ## Persistence checks
 
-`tests/persistence.test.ts` exercises the package facade's cache lifecycle,
-round trips, mutation capture, corrupt-cache rejection, atomic readers, and
-writer exclusion. `tests/package-api.test.mjs` repeats the essential cache hit,
-miss, fresh-process, replacement, and corruption cases through the built CJS
-package. The native-artifact CI matrix runs the full `pnpm run test` suite on
-every supported OS artifact with `CARGO_BUILD_TARGET` set to that row's target,
-so Rust test helpers and the loaded addon use the same architecture.
+The package `test` command above covers persistence at three boundaries:
+
+- `tests/persistence.test.ts` checks the package facade's cache lifecycle,
+  round trips, mutation capture, corrupt-cache rejection, atomic readers, and
+  same-destination writer exclusion.
+- `tests/package-api.test.mjs` repeats cache hit, miss, fresh-process reuse,
+  replacement, corruption, and child/worker writer cases through the built CJS
+  package.
+- Rust tests in `src/persistence.rs` check payload validation, failed
+  publication, process death, filesystem aliases, and platform-specific
+  replacement behavior.
+
+The native-artifact CI matrix runs the full `pnpm run test` suite on every
+supported OS artifact with `CARGO_BUILD_TARGET` set to that row's target. Rust
+test helpers and the loaded addon therefore use the same architecture.
 
 Persistence writes one opaque cache payload plus a retained sibling lock file
 (`.<basename>.okf-lock`) and temporary siblings during publication. The lock
 file is coordination metadata, not a second cache payload. A killed process can
-leave an owned temporary file; cleanup of such orphans is intentionally manual
-in v1. Atomic replacement protects cooperating local-filesystem readers, not
+leave an owned temporary file; v1 cleanup of such orphans is intentionally
+manual. Atomic replacement protects cooperating local-filesystem readers, not
 power-loss durability or arbitrary network-filesystem behavior.
 
 
