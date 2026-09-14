@@ -35,7 +35,8 @@ use tantivy::{
 use thiserror::Error as ThisError;
 
 const TOKENIZER: &str = "okf";
-const WRITER_HEAP_BYTES: usize = 15_000_000;
+// Tantivy requires 15 MB per worker; this allows up to four, bounded by available CPUs.
+const WRITER_HEAP_BYTES: usize = 60_000_000;
 const FETCH_FLOOR: usize = 32;
 const MAX_SAFE_INTEGER: u128 = 9_007_199_254_740_991;
 
