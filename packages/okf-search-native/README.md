@@ -172,6 +172,35 @@ console.log(index.listTypes());
 console.log(index.listDegradedDocuments());
 ```
 
+## Performance benchmarks
+
+On a private `wiki-w-type` collection of 13,692 Markdown documents (59.57 MiB
+of source text), native opened about **9.9× faster** and used **79% less
+post-open resident memory** in this benchmark.
+
+| Metric | [okf-minisearch 2.3.0][benchmark-minisearch] | [okf-search-native 0.5.1][benchmark-native] |
+| --- | ---: | ---: |
+| Median `openOkf` time | 21.85 s | 2.21 s |
+| Warm query p50 | 11.05 ms | 1.33 ms |
+| Warm query p95 | 87.02 ms | 2.32 ms |
+| Median post-open RSS | 2,417 MiB | 502 MiB |
+| Median peak RSS | 3,138 MiB | 590 MiB |
+
+[benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-minisearch/package.json
+[benchmark-native]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-search-native/package.json
+
+Measured on macOS arm64, Node.js 24.15.0, using local builds of the linked
+source revisions (native in release mode).
+
+- **Method:** five fresh processes per backend, run sequentially; nine default-option
+  queries, each with 30 warmups and 200 timed calls per process. Query percentiles
+  pool all samples. Open time excludes imports; filesystem caches were not cleared.
+- **Memory:** RSS covers the whole process, including native allocations. Post-open
+  samples follow `indexStats()` and forced GC; peak includes startup, stats, and
+  searches. MiniSearch's stats serialization can increase memory usage.
+- **Limits:** one private corpus, not distributed here. MiniSearch was faster on
+  two queries; equivalent hits and ranking were not tested.
+
 ## Reference and development
 
 - [API reference](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md): options, return values, errors, and index statistics.
