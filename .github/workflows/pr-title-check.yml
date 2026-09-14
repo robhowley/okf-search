@@ -15,7 +15,7 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          if [[ "$PR_TITLE" =~ ^(feat|fix|docs|chore|refactor|test|style|perf|ci|build|revert)(\(.+\))?!?:\ .+ ]]; then
+          if [[ "$PR_TITLE" =~ ^(feat|fix|deps|docs|chore|refactor|test|style|perf|ci|build|revert)(\(.+\))?!?:\ .+ ]]; then
             echo "PR title is valid: $PR_TITLE"
           else
             echo "ERROR: PR title must follow conventional commits format."
