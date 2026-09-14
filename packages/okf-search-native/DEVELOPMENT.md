@@ -47,4 +47,13 @@ leave an owned temporary file; v1 cleanup of such orphans is intentionally
 manual. Atomic replacement protects cooperating local-filesystem readers, not
 power-loss durability or arbitrary network-filesystem behavior.
 
+Cache format 2 stores `OKFCACHE`, a little-endian u32 version, u64 compressed
+manifest length, u64 JSON length, one zstd level-3 JSON frame, unchanged Tantivy
+files in manifest order, then SHA-256 of the compressed manifest and file bytes.
+The header is 28 bytes; the digest is 32 bytes. Metadata limits are 65 MiB encoded,
+64 MiB decoded, and a 64 MiB decoder window. Loading verifies the digest before
+decoding and rejects extra frames, trailing bytes, truncation, and length mismatches.
+Inventory and index validation are unchanged. Older formats are incompatible;
+there is no migration or automatic rebuild.
+
 

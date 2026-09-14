@@ -290,6 +290,24 @@ stale_after: 2027-01-01T00:00:00Z`,
     expect((error as Error).message).not.toMatch(/source-is-missing/);
   });
 
+  it("rejects format 1 without rebuilding or replacing the cache", async () => {
+    const { root, directory } = await workspace();
+    await writeCollection(root, {
+      "source.md": concept("type: note", "old-format-marker"),
+    });
+    const cachePath = join(directory, "old.okf");
+    // Format 1's minimum envelope: magic, version, JSON length, JSON, digest.
+    const old = Buffer.alloc(54);
+    old.write("OKFCACHE");
+    old.writeUInt32LE(1, 8);
+    old.writeBigUInt64LE(2n, 12);
+    old.write("{}", 20);
+    await writeFile(cachePath, old);
+    expectOkfError(await rejected(openOkf(root, { cachePath })),
+      "ERR_OKF_CACHE_INCOMPATIBLE", cachePath);
+    expect(await readFile(cachePath)).toEqual(old);
+  });
+
   it("publishes whole generations while cached readers run concurrently", async () => {
     const { directory } = await workspace();
     const cachePath = join(directory, "cache", "atomic.okf");

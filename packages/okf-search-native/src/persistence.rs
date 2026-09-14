@@ -10,8 +10,10 @@ use std::path::{Component, Path, PathBuf};
 use tantivy::directory::Directory;
 
 const MAGIC: &[u8; 8] = b"OKFCACHE";
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 const MAX_MANIFEST: usize = 64 * 1024 * 1024;
+// Allow framing overhead for incompressible JSON at the logical limit.
+const MAX_ENCODED_MANIFEST: usize = 65 * 1024 * 1024;
 // Bump the corresponding revision whenever schema, analysis, or preparation
 // semantics change. The exact Tantivy dependency is pinned in Cargo.toml.
 const COMPATIBILITY: &str = "schema=1;analyzer=1;preparation=1;tantivy=0.26.1";
@@ -237,6 +239,17 @@ impl Snapshot {
                 "inventory exceeds cache manifest limit",
             ));
         }
+        let decoded_length = metadata.len();
+        let encoded_metadata = zstd::bulk::compress(&metadata, 3)
+            .map_err(|e| error("ERR_OKF_WRITE", &guard.supplied, e))?;
+        drop(metadata);
+        if encoded_metadata.len() > MAX_ENCODED_MANIFEST {
+            return Err(error(
+                "ERR_OKF_WRITE",
+                &guard.supplied,
+                "encoded manifest exceeds limit",
+            ));
+        }
         let write = |e| error("ERR_OKF_WRITE", &guard.supplied, e);
         let mut temp =
             tempfile::NamedTempFile::new_in(guard.destination.parent().unwrap()).map_err(write)?;
@@ -244,11 +257,13 @@ impl Snapshot {
         checkpoint(0).map_err(write)?;
         temp.write_all(MAGIC).map_err(write)?;
         temp.write_all(&FORMAT.to_le_bytes()).map_err(write)?;
-        temp.write_all(&(metadata.len() as u64).to_le_bytes())
+        temp.write_all(&(encoded_metadata.len() as u64).to_le_bytes())
+            .map_err(write)?;
+        temp.write_all(&(decoded_length as u64).to_le_bytes())
             .map_err(write)?;
         let mut hash = Sha256::new();
-        hash.update(&metadata);
-        temp.write_all(&metadata).map_err(write)?;
+        hash.update(&encoded_metadata);
+        temp.write_all(&encoded_metadata).map_err(write)?;
         #[cfg(test)]
         checkpoint(1).map_err(write)?;
         for bytes in files.values() {
@@ -320,15 +335,42 @@ fn decode_cache(bytes: &[u8], path: &str) -> Result<Engine> {
     }
     let length = usize::try_from(u64::from_le_bytes(bytes[12..20].try_into().unwrap()))
         .map_err(|_| bad("manifest length overflow"))?;
-    if length > MAX_MANIFEST || length > bytes.len() - 52 {
+    if bytes.len() < 60 {
+        return Err(bad("truncated cache header"));
+    }
+    if length > MAX_ENCODED_MANIFEST || length > bytes.len() - 60 {
         return Err(bad("invalid manifest length"));
     }
     let end = bytes.len() - 32;
-    if Sha256::digest(&bytes[20..end])[..] != bytes[end..] {
+    if Sha256::digest(&bytes[28..end])[..] != bytes[end..] {
         return Err(bad("checksum mismatch"));
     }
-    let manifest: Manifest = serde_json::from_slice(&bytes[20..20 + length])
+    let decoded_length = usize::try_from(u64::from_le_bytes(bytes[20..28].try_into().unwrap()))
+        .map_err(|_| bad("decoded manifest length overflow"))?;
+    if decoded_length > MAX_MANIFEST {
+        return Err(bad("invalid decoded manifest length"));
+    }
+    // A slice is already buffered: finish() returns exactly the unconsumed input.
+    let mut decoder = zstd::stream::read::Decoder::with_buffer(&bytes[28..28 + length])
+        .map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))?
+        .single_frame();
+    decoder
+        .window_log_max(26)
         .map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))?;
+    let mut metadata = Vec::new();
+    decoder
+        .by_ref()
+        .take(decoded_length as u64 + 1)
+        .read_to_end(&mut metadata)
+        .map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))?;
+    if metadata.len() != decoded_length || !decoder.finish().is_empty() {
+        return Err(bad(
+            "manifest output length mismatch or trailing compressed bytes",
+        ));
+    }
+    let manifest: Manifest =
+        serde_json::from_slice(&metadata).map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))?;
+    drop(metadata);
     if manifest.compatibility != COMPATIBILITY {
         return Err(error(
             "ERR_OKF_CACHE_INCOMPATIBLE",
@@ -336,7 +378,7 @@ fn decode_cache(bytes: &[u8], path: &str) -> Result<Engine> {
             "unsupported schema/analyzer/preparation/Tantivy revision",
         ));
     }
-    let mut offset = 20 + length;
+    let mut offset = 28 + length;
     let mut files = BTreeMap::new();
     for (name, length) in manifest.files {
         let mut components = Path::new(&name).components();
@@ -612,18 +654,21 @@ mod tests {
     }
     fn resign(bytes: &mut Vec<u8>) {
         bytes.truncate(bytes.len() - 32);
-        let hash = Sha256::digest(&bytes[20..]);
+        let hash = Sha256::digest(&bytes[28..]);
         bytes.extend_from_slice(&hash);
     }
     fn rewrite_manifest(bytes: &[u8], change: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
         let length = u64::from_le_bytes(bytes[12..20].try_into().unwrap()) as usize;
-        let mut value = serde_json::from_slice(&bytes[20..20 + length]).unwrap();
+        let decoded = zstd::stream::decode_all(&bytes[28..28 + length]).unwrap();
+        let mut value = serde_json::from_slice(&decoded).unwrap();
         change(&mut value);
         let manifest = serde_json::to_vec(&value).unwrap();
+        let encoded = zstd::bulk::compress(&manifest, 3).unwrap();
         let mut output = bytes[..12].to_vec();
+        output.extend_from_slice(&(encoded.len() as u64).to_le_bytes());
         output.extend_from_slice(&(manifest.len() as u64).to_le_bytes());
-        output.extend_from_slice(&manifest);
-        output.extend_from_slice(&bytes[20 + length..]);
+        output.extend_from_slice(&encoded);
+        output.extend_from_slice(&bytes[28 + length..]);
         resign(&mut output);
         output
     }
@@ -804,7 +849,7 @@ mod tests {
         fs::write(&path, corrupt).unwrap();
         assert_eq!(load_error(&path), "ERR_OKF_CACHE_INVALID");
         let mut incompatible = original.clone();
-        incompatible[8] = 2;
+        incompatible[8] = 1;
         fs::write(&path, incompatible).unwrap();
         assert_eq!(load_error(&path), "ERR_OKF_CACHE_INCOMPATIBLE");
         let changed = rewrite_manifest(&original, |m| m["compatibility"] = "new".into());
@@ -839,8 +884,9 @@ mod tests {
         // A valid envelope digest does not exempt embedded Tantivy checksums.
         let mut corrupt = original.clone();
         let length = u64::from_le_bytes(corrupt[12..20].try_into().unwrap()) as usize;
-        let manifest: Manifest = serde_json::from_slice(&corrupt[20..20 + length]).unwrap();
-        let mut offset = 20 + length;
+        let decoded = zstd::stream::decode_all(&corrupt[28..28 + length]).unwrap();
+        let manifest: Manifest = serde_json::from_slice(&decoded).unwrap();
+        let mut offset = 28 + length;
         for (name, length) in manifest.files {
             if name.ends_with(".store") {
                 corrupt[offset] ^= 1;
@@ -860,16 +906,105 @@ mod tests {
         save(&engine("valid"), &path);
         let original = fs::read(&path).unwrap();
         let length = u64::from_le_bytes(original[12..20].try_into().unwrap()) as usize;
-        let manifest = std::str::from_utf8(&original[20..20 + length]).unwrap();
+        let decoded = zstd::stream::decode_all(&original[28..28 + length]).unwrap();
+        let manifest = std::str::from_utf8(&decoded).unwrap();
         let duplicate = manifest.replace("\"files\":{", "\"files\":{\".managed.json\":0,");
         assert_ne!(duplicate, manifest);
         let mut bytes = original[..12].to_vec();
+        let encoded = zstd::bulk::compress(duplicate.as_bytes(), 3).unwrap();
+        bytes.extend_from_slice(&(encoded.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(duplicate.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(duplicate.as_bytes());
-        bytes.extend_from_slice(&original[20 + length..]);
+        bytes.extend_from_slice(&encoded);
+        bytes.extend_from_slice(&original[28 + length..]);
         resign(&mut bytes);
         fs::write(&path, bytes).unwrap();
         assert_eq!(load_error(&path), "ERR_OKF_CACHE_INVALID");
+    }
+
+    #[test]
+    fn persistence_compressed_manifest_limits_and_framing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = destination(&temp);
+        save(&engine("valid"), &path);
+        let original = fs::read(&path).unwrap();
+        let length = u64::from_le_bytes(original[12..20].try_into().unwrap()) as usize;
+        let encoded = &original[28..28 + length];
+        let decoded = zstd::stream::decode_all(encoded).unwrap();
+        let envelope = |frame: &[u8], decoded_length: u64| {
+            let mut bytes = original[..12].to_vec();
+            bytes.extend_from_slice(&(frame.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(&decoded_length.to_le_bytes());
+            bytes.extend_from_slice(frame);
+            bytes.extend_from_slice(&original[28 + length..]);
+            resign(&mut bytes);
+            bytes
+        };
+        assert!(decode_cache(&envelope(encoded, decoded.len() as u64), &path).is_ok());
+        let mut trailing = encoded.to_vec();
+        trailing.push(0);
+        let mut concatenated = encoded.to_vec();
+        concatenated.extend_from_slice(encoded);
+        let mut damaged = encoded.to_vec();
+        damaged[0] ^= 1;
+        let bomb = zstd::bulk::compress(&vec![b' '; MAX_MANIFEST + 1], 3).unwrap();
+        for bytes in [
+            envelope(&encoded[..encoded.len() - 1], decoded.len() as u64),
+            envelope(&[], decoded.len() as u64),
+            envelope(&trailing, decoded.len() as u64),
+            envelope(&concatenated, decoded.len() as u64),
+            envelope(&damaged, decoded.len() as u64),
+            envelope(encoded, decoded.len() as u64 - 1),
+            envelope(encoded, decoded.len() as u64 + 1),
+            envelope(encoded, MAX_MANIFEST as u64 + 1),
+            envelope(encoded, u64::MAX),
+        ] {
+            assert_eq!(
+                decode_cache(&bytes, &path).err().unwrap().code,
+                "ERR_OKF_CACHE_INVALID"
+            );
+        }
+        let failure = decode_cache(&envelope(&bomb, MAX_MANIFEST as u64), &path)
+            .err()
+            .unwrap();
+        assert!(
+            failure
+                .cause
+                .unwrap()
+                .to_string()
+                .contains("output length mismatch")
+        );
+        // Non-single-segment frame requests a 128 MiB window, above our 64 MiB cap.
+        let oversized_window = [0x28, 0xb5, 0x2f, 0xfd, 0, 0x88, 1, 0, 0];
+        let failure = decode_cache(&envelope(&oversized_window, 0), &path)
+            .err()
+            .unwrap();
+        assert!(
+            failure
+                .cause
+                .unwrap()
+                .to_string()
+                .contains("too much memory")
+        );
+        for length in [MAX_ENCODED_MANIFEST as u64 + 1, u64::MAX] {
+            let mut bytes = original.clone();
+            bytes[12..20].copy_from_slice(&length.to_le_bytes());
+            assert_eq!(
+                decode_cache(&bytes, &path).err().unwrap().code,
+                "ERR_OKF_CACHE_INVALID"
+            );
+        }
+        let mut bytes = envelope(&damaged, decoded.len() as u64);
+        let digest_start = bytes.len() - 32;
+        bytes[digest_start] ^= 1;
+        assert_eq!(
+            decode_cache(&bytes, &path)
+                .err()
+                .unwrap()
+                .cause
+                .unwrap()
+                .to_string(),
+            "checksum mismatch"
+        );
     }
 
     #[test]

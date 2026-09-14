@@ -205,23 +205,24 @@ index.ingest({
 await index.save("./.cache/notes.okf");
 ```
 
-The native boundary captures one consistent handle state before `save` returns;
-mutations after capture require another save. The promise resolves after atomic
-publication, not merely after capture. Overlapping writers to one destination
-reject with `ERR_OKF_CACHE_BUSY`; independent handles are never merged. A
-failed save does not replace a previous complete cache and does not poison a
-healthy handle.
+- `save` takes a snapshot when called. Later changes need another save.
+- `await save(path)` waits until the cache file has been replaced.
+- Only one save can write a path at a time; others fail with
+  `ERR_OKF_CACHE_BUSY`. Separate indexes are not merged.
+- If saving fails, the old cache and a healthy index remain usable.
 
-### Atomic publication and readers
+### Cache files and safety
 
-The payload is one opaque cache file. Publication uses temporary siblings and a
-retained sibling lock file (`.<basename>.okf-lock`) for writer exclusion. The
-lock file is coordination metadata, not cache payload, and is intentionally kept
-after a save; readers do not need it. A killed process can leave its uniquely
-named temporary file for manual cleanup. Cooperating readers on a normal local
-filesystem see either the old or new complete cache generation, not partial
-bytes. Atomic replacement is not a power-loss durability guarantee and does not
-define behavior for hostile or unreliable network filesystems.
+The cache is one file. On a local filesystem, readers see the complete old or
+new file—never a partly written one. This does not guarantee recovery after
+power loss or safe writes on network filesystems.
+
+Saving also creates files beside the cache:
+
+- `.<basename>.okf-lock` prevents simultaneous writes. Leave it in place;
+  loading or copying the cache does not require it.
+- Temporary files are normally removed. If the process is killed, they may
+  need manual cleanup.
 
 ## Validation and failures
 
