@@ -189,27 +189,17 @@ post-open resident memory** in this benchmark.
 [benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-minisearch/package.json
 [benchmark-native]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-search-native/package.json
 
-Measured September 14, 2026 on macOS arm64 with Node.js 24.15.0. Both packages
-were built locally from commit `db885cb850e986e99bd9f5117e390d89ea9cf90c`,
-with a release build for native, rather than installed from npm tarballs.
+Measured on macOS arm64, Node.js 24.15.0, using local builds of the linked
+source revisions (native in release mode).
 
-- **Trials:** five fresh processes per backend, run sequentially in alternating
-  order. `openOkf` includes reading and indexing, but excludes module import;
-  filesystem caches were not cleared.
-- **Queries:** `ranking`, `native search`, `state machine`, `the`, `tantivy`,
-  `https`, `stable`, `method`, and `shopify`, using `index.search(query)` with
-  default options. Each query had 30 warmups and 200 timed calls per process;
-  query percentiles pool all nine queries across all five trials.
-- **Memory:** RSS is whole-process resident memory, including native allocations,
-  not just the JavaScript heap. Post-open RSS was sampled after `indexStats()`
-  and two forced garbage collections. MiniSearch's stats calculation serializes
-  its index and can affect retained memory. Peak RSS covers startup, stats, and
-  searches, not just the index; no forced GC ran during timed searches.
-- **Scope:** this is one corpus and query mix, not a universal speedup. MiniSearch
-  was faster for `tantivy` and `stable`. Document counts and result shapes were
-  checked, but equivalent hits and ranking were not. The private corpus is not
-  distributed, so these results are not independently reproducible from this
-  repository alone.
+- **Method:** five fresh processes per backend, run sequentially; nine default-option
+  queries, each with 30 warmups and 200 timed calls per process. Query percentiles
+  pool all samples. Open time excludes imports; filesystem caches were not cleared.
+- **Memory:** RSS covers the whole process, including native allocations. Post-open
+  samples follow `indexStats()` and forced GC; peak includes startup, stats, and
+  searches. MiniSearch's stats serialization can increase memory usage.
+- **Limits:** one private corpus, not distributed here. MiniSearch was faster on
+  two queries; equivalent hits and ranking were not tested.
 
 ## Reference and development
 
