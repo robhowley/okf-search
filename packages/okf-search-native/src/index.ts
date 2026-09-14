@@ -18,6 +18,7 @@ export type {
   OkfIndexStats,
   OkfIndexStorageStats,
   OkfLogicalIndexStats,
+  OkfOpenOptions,
   OkfIngestResult,
   OkfParameter,
   OkfSearch,

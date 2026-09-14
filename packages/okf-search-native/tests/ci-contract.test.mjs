@@ -77,6 +77,17 @@ for (const [label, spec] of Object.entries(workflows)) {
   });
 }
 
+test("source CI runs Rust persistence tests on every native target before upload", async () => {
+  const workflow = await parseWorkflow(workflows.source.path);
+  const steps = workflow.jobs[workflows.source.job].steps;
+  const index = steps.findIndex(({ name }) => name === "Rust persistence tests");
+  assert.ok(index >= 0);
+  assert.equal(steps[index].run, 'cargo test --locked --target "${{ matrix.target }}" persistence');
+  assert.equal(steps[index]["working-directory"], "packages/okf-search-native");
+  assert.equal(steps[index].if, undefined);
+  assert.ok(index < steps.findIndex(({ name }) => name === "Upload tested artifact"));
+});
+
 test("the build owner applies common flags, target options, and facade sequencing", async () => {
   const events = [];
   await buildNativePackage(
@@ -141,6 +152,7 @@ test("native package exposes one complete build boundary and portable facade tes
   for (const filename of [
     "directory.test.ts",
     "lifecycle.test.ts",
+    "persistence.test.ts",
     "raw-boundary.test.ts",
     "root-contract.test.ts",
     "search-options.test.ts",

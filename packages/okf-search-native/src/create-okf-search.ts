@@ -41,22 +41,39 @@ export function wrapNative(native: NativeOkfSearch): OkfSearch {
     }
   };
 
+  const translateNativeFailure = (path: string, error: unknown): never => {
+    if (nativeMessage(error).match(POISON_MARKER)) {
+      const nativePath = error instanceof Error
+        ? Object.getOwnPropertyDescriptor(error, "path")?.value
+        : undefined;
+      const failurePath = typeof nativePath === "string" ? nativePath : path;
+      unusableError ??= new OkfError("ERR_OKF_INDEX_UNUSABLE", failurePath);
+      throw unusableError;
+    }
+
+    throwNativeError(error, path);
+  };
+
   const callNative = <T>(path: string, call: () => T): T => {
     assertUsable();
 
     try {
       return call();
     } catch (error) {
-      if (nativeMessage(error).match(POISON_MARKER)) {
-        const nativePath = error instanceof Error
-          ? Object.getOwnPropertyDescriptor(error, "path")?.value
-          : undefined;
-        const failurePath = typeof nativePath === "string" ? nativePath : path;
-        unusableError ??= new OkfError("ERR_OKF_INDEX_UNUSABLE", failurePath);
-        throw unusableError;
-      }
+      return translateNativeFailure(path, error);
+    }
+  };
 
-      throwNativeError(error, path);
+  const callNativeAsync = async <T>(
+    path: string,
+    call: () => Promise<T>,
+  ): Promise<T> => {
+    assertUsable();
+
+    try {
+      return await call();
+    } catch (error) {
+      return translateNativeFailure(path, error);
     }
   };
 
@@ -64,6 +81,10 @@ export function wrapNative(native: NativeOkfSearch): OkfSearch {
     indexStats(): OkfIndexStats {
       assertUsable();
       return copyIndexStats(callNative("<index>", () => native.indexStats()));
+    },
+
+    async save(path): Promise<void> {
+      await callNativeAsync("<index>", () => native.save(path));
     },
 
     ingest(input): OkfIngestResult {

@@ -61,13 +61,35 @@ Use the path and line numbers to open the source, and the heading and snippet
 to display a preview. Results contain at most one hit per document, ordered by
 relevance. See the [complete result shape](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#results).
 
-**Open once and reuse the handle.** Opening reads and indexes the collection
-into memory; every new `openOkf` call rebuilds it. The handle does not watch
-files, write changes to disk, or persist the index. Reopen to pick up filesystem
-changes.
+**Open once and reuse the handle.** Without options, opening reads and indexes
+the collection into memory; the handle does not watch files or write source
+files. To reuse a native snapshot, pass a filesystem `cachePath`:
+
+```js
+const index = await openOkf("./knowledge", {
+  cachePath: "./.cache/knowledge.okf",
+});
+
+index.ingest({
+  path: "runbooks/new.md",
+  markdown: "---\ntype: runbook\n---\nNew material.\n",
+});
+await index.save("./.cache/knowledge.okf");
+```
+
+A missing cache builds from `root`, creates parent directories, and publishes the
+cache before `openOkf` resolves. An existing cache is loaded without reading or
+requiring `root`; its saved document paths are retained. Existing corrupt,
+incompatible, or unreadable cache destinations reject instead of silently
+rebuilding from the source. Cache metadata records the supported format and
+index compatibility revisions; damaged contents report
+`ERR_OKF_CACHE_INVALID`, while unsupported revisions report
+`ERR_OKF_CACHE_INCOMPATIBLE`. A missing-cache writer that loses the destination
+claim rejects with `ERR_OKF_CACHE_BUSY`. `cachePath` is a filesystem path, not
+a Markdown identity.
 
 `openOkf` recursively reads lowercase `.md` files, excluding files named exactly
-`index.md` or `log.md`.
+`index.md` or `log.md`. With no `cachePath`, it never creates cache artifacts.
 
 ## Already have Markdown strings?
 
@@ -129,6 +151,33 @@ index.remove("runbooks/restart.md");
 Use relative `.md` paths, such as `runbooks/restart.md`. If preparation of a
 replacement fails, the existing document remains searchable.
 See [update results and path rules](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#update-and-reuse-the-handle).
+
+### Save an in-memory snapshot
+
+`save(path)` is available on handles from both `openOkf` and
+`createOkfSearch`. It captures one consistent handle state and resolves only
+after the complete cache file has been atomically published:
+
+```js
+const index = createOkfSearch([
+  { path: "notes/one.md", markdown: "---\ntype: note\n---\nOne.\n" },
+]);
+
+await index.save("./.cache/notes.okf");
+```
+
+Mutations made after capture are not included until another save. Overlapping
+saves to the same destination reject with `ERR_OKF_CACHE_BUSY`; independent
+handles are not merged. A failed save leaves the previous complete cache
+usable, and does not poison an otherwise healthy handle.
+
+The payload is one opaque cache file. A retained sibling lock file coordinates
+writers (currently named `.<basename>.okf-lock`) and is not needed to open the
+cache; uniquely named temporary siblings may exist during publication. A killed
+process can leave a temporary sibling for manual cleanup. Replacement is atomic
+for cooperating readers on a normal local filesystem: a reader sees the old or
+new complete generation, not a partial file. This does not promise power-loss
+durability or network-filesystem semantics.
 
 ## Check documents and handle failures
 

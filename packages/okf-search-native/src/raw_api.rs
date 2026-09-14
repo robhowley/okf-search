@@ -27,9 +27,16 @@ pub(super) fn decode(
 
 pub(super) fn preparation_error(env: &Env, error: PreparationError) -> Error {
     let value = (|| -> Result<Unknown<'_>> {
+        let message = match error.code {
+            "ERR_OKF_WRITE" => format!("Cannot write OKF cache: {}", error.path),
+            "ERR_OKF_CACHE_INVALID" => format!("Invalid OKF cache: {}", error.path),
+            "ERR_OKF_CACHE_INCOMPATIBLE" => format!("Incompatible OKF cache: {}", error.path),
+            "ERR_OKF_CACHE_BUSY" => format!("Another writer holds OKF cache: {}", error.path),
+            _ => error.to_string(),
+        };
         let mut value = env.create_error(Error::new(
             napi::Status::GenericFailure,
-            format!("[{}] {error}", error.code),
+            format!("[{}] {message}", error.code),
         ))?;
         value.set("code", error.code)?;
         value.set("path", error.path)?;
@@ -103,11 +110,41 @@ pub(super) fn validate_raw(env: Env, input: Object<'_>) -> Result<Object<'static
 
 pub struct OpenTask {
     root: Utf16String,
+    cache_path: Option<Utf16String>,
 }
 impl Task for OpenTask {
     type Output = std::result::Result<NativeOkfSearch, PreparationError>;
     type JsValue = NativeOkfSearch;
     fn compute(&mut self) -> Result<Self::Output> {
+        let mut guard = None;
+        if let Some(value) = &self.cache_path {
+            let path = match crate::persistence::path(value, "cachePath") {
+                Ok(path) => path,
+                Err(e) => return Ok(Err(e)),
+            };
+            match crate::persistence::load(&path) {
+                Ok(Some(engine)) => {
+                    return Ok(Ok(NativeOkfSearch {
+                        inner: Mutex::new(engine),
+                    }));
+                }
+                Err(e) => return Ok(Err(e)),
+                Ok(None) => (),
+            }
+            guard = match crate::persistence::WriterGuard::acquire(&path) {
+                Ok(guard) => Some(guard),
+                Err(e) => return Ok(Err(e)),
+            };
+            match crate::persistence::load(&path) {
+                Ok(Some(engine)) => {
+                    return Ok(Ok(NativeOkfSearch {
+                        inner: Mutex::new(engine),
+                    }));
+                }
+                Err(e) => return Ok(Err(e)),
+                Ok(None) => (),
+            }
+        }
         let root = match decode(&self.root, "ERR_OKF_FIELD", "<input>", Some("path")) {
             Ok(root) => root,
             Err(error) => return Ok(Err(error)),
@@ -122,6 +159,11 @@ impl Task for OpenTask {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(native_error)?;
         let engine = Engine::new(documents).map_err(native_error)?;
+        if let Some(guard) = guard {
+            if let Err(e) = crate::persistence::Snapshot::capture(&engine).publish(&guard) {
+                return Ok(Err(e));
+            }
+        }
         Ok(Ok(NativeOkfSearch {
             inner: Mutex::new(engine),
         }))
@@ -134,8 +176,8 @@ impl Task for OpenTask {
     }
 }
 
-pub(super) fn open_raw(root: Utf16String) -> AsyncTask<OpenTask> {
-    AsyncTask::new(OpenTask { root })
+pub(super) fn open_raw(root: Utf16String, cache_path: Option<Utf16String>) -> AsyncTask<OpenTask> {
+    AsyncTask::new(OpenTask { root, cache_path })
 }
 
 pub(super) fn ingest_result(env: &Env, entry: &PreparedEntry) -> Result<Object<'static>> {
@@ -339,5 +381,151 @@ pub(super) fn mutation_error(env: &Env, error: crate::EngineError, path: &str) -
     match value {
         Ok(value) => Error::from(value),
         Err(error) => error,
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn persistence_open_miss_publishes_and_hit_never_decodes_or_reads_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        fs::create_dir(&root).unwrap();
+        fs::write(
+            root.join("a.md"),
+            "---\ntype: note\n---\n# Title\nSaved content.",
+        )
+        .unwrap();
+        let cache = temp
+            .path()
+            .join("nested/cache")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let opened = OpenTask {
+            root: root.to_str().unwrap().to_owned().into(),
+            cache_path: Some(cache.clone().into()),
+        }
+        .compute()
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            opened
+                .inner
+                .lock()
+                .index_stats()
+                .unwrap()
+                .logical
+                .documents
+                .total,
+            1.0
+        );
+        assert!(fs::metadata(&cache).unwrap().is_file());
+        fs::remove_dir_all(root).unwrap();
+        let loaded = OpenTask {
+            root: vec![0xd800].into(),
+            cache_path: Some(cache.into()),
+        }
+        .compute()
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            loaded
+                .inner
+                .lock()
+                .index_stats()
+                .unwrap()
+                .logical
+                .documents
+                .total,
+            1.0
+        );
+    }
+
+    #[test]
+    fn persistence_open_miss_publication_failure_rejects_cleans_up_and_retries() {
+        for point in 0..=2 {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("root");
+            fs::create_dir(&root).unwrap();
+            fs::write(root.join("a.md"), "---\ntype: note\n---\nSaved content.").unwrap();
+            let cache = temp.path().join("nested/cache");
+            let cache_path = cache.to_str().unwrap().to_owned();
+            let mut task = OpenTask {
+                root: root.to_str().unwrap().to_owned().into(),
+                cache_path: Some(cache_path.clone().into()),
+            };
+            // Exercise the actual miss branch, not the publisher in isolation.
+            crate::persistence::PUBLICATION_FAILURE.set(Some(point));
+            let result = task
+                .compute()
+                .expect("preparation errors use the task output");
+            let Err(error) = result else {
+                panic!("required publication failed but OpenTask returned a handle");
+            };
+            assert_eq!(error.code, "ERR_OKF_WRITE");
+            assert_eq!(error.path, cache_path);
+            assert!(!cache.exists());
+            // Only the retained writer-lock file may remain; no owned temp file.
+            assert_eq!(fs::read_dir(cache.parent().unwrap()).unwrap().count(), 1);
+            let opened = task
+                .compute()
+                .unwrap()
+                .expect("retry releases the writer claim");
+            assert_eq!(
+                opened
+                    .inner
+                    .lock()
+                    .index_stats()
+                    .unwrap()
+                    .logical
+                    .documents
+                    .total,
+                1.0
+            );
+            assert!(crate::persistence::load(&cache_path).unwrap().is_some());
+        }
+    }
+
+    #[test]
+    fn persistence_bad_cache_rejects_without_source_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("cache");
+        fs::write(&cache, "bad").unwrap();
+        let result = OpenTask {
+            root: vec![0xd800].into(),
+            cache_path: Some(cache.to_str().unwrap().to_owned().into()),
+        }
+        .compute()
+        .unwrap();
+        assert!(matches!(result, Err(e) if e.code == "ERR_OKF_CACHE_INVALID"));
+    }
+
+    #[test]
+    fn persistence_initialization_claim_is_nonblocking_and_path_errors_are_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("cache").to_str().unwrap().to_owned();
+        let _guard = crate::persistence::WriterGuard::acquire(&cache).unwrap();
+        let result = OpenTask {
+            root: vec![0xd800].into(),
+            cache_path: Some(cache.into()),
+        }
+        .compute()
+        .unwrap();
+        assert!(matches!(result, Err(e) if e.code == "ERR_OKF_CACHE_BUSY"));
+        for path in [vec![], vec![0], vec![0xd800]] {
+            let result = OpenTask {
+                root: vec![0xd800].into(),
+                cache_path: Some(path.into()),
+            }
+            .compute()
+            .unwrap();
+            assert!(
+                matches!(result, Err(e) if e.code == "ERR_OKF_FIELD" && e.field.as_deref() == Some("cachePath"))
+            );
+        }
     }
 }

@@ -17,8 +17,17 @@ chrono = "0.4"
 napi = { version = "3.12", default-features = false, features = ["napi8", "chrono_date", "dyn-symbols"] }
 napi-derive = "3"
 parking_lot = "0.12"
-tantivy = "0.26.1"
+# Cache compatibility metadata deliberately supports this exact index implementation.
+tantivy = "=0.26.1"
 thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+fs4 = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"

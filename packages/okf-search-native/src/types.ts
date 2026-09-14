@@ -78,12 +78,20 @@ export interface OkfDocumentInput {
   markdown: string;
 }
 
+export interface OkfOpenOptions {
+  readonly cachePath?: string;
+}
+
 export type OkfDiagnosticCode = "ERR_OKF_PARSE" | "ERR_OKF_FIELD";
 
 export type OkfErrorCode =
   | "ERR_OKF_READ"
   | "ERR_OKF_PARSE"
   | "ERR_OKF_FIELD"
+  | "ERR_OKF_CACHE_INVALID"
+  | "ERR_OKF_CACHE_INCOMPATIBLE"
+  | "ERR_OKF_WRITE"
+  | "ERR_OKF_CACHE_BUSY"
   | "ERR_OKF_INDEX_UNUSABLE"
   | "ERR_OKF_UNSUPPORTED";
 
@@ -206,6 +214,7 @@ export interface OkfSearchHit {
 
 export interface OkfSearch {
   indexStats(): OkfIndexStats;
+  save(path: string): Promise<void>;
   ingest(input: OkfDocumentInput): OkfIngestResult;
   listDegradedDocuments(): readonly OkfDegradedDocument[];
   listTypes(): readonly string[];

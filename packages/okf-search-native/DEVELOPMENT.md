@@ -22,4 +22,19 @@ the required artifact names from the checked-in target list and rejects missing
 or extra native files. CI also uses its `glibc <artifact>` mode to reject Linux
 addons that import symbols newer than `GLIBC_2.17`.
 
+## Persistence checks
+
+`tests/persistence.test.ts` exercises the package facade's cache lifecycle,
+round trips, mutation capture, corrupt-cache rejection, atomic readers, and
+writer exclusion. `tests/package-api.test.mjs` repeats the essential cache hit,
+miss, fresh-process, replacement, and corruption cases through the built CJS
+package; run it on every supported OS artifact.
+
+Persistence writes one opaque cache payload plus a retained sibling lock file
+(`.<basename>.okf-lock`) and temporary siblings during publication. The lock
+file is coordination metadata, not a second cache payload. A killed process can
+leave an owned temporary file; cleanup of such orphans is intentionally manual
+in v1. Atomic replacement protects cooperating local-filesystem readers, not
+power-loss durability or arbitrary network-filesystem behavior.
+
 

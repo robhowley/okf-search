@@ -401,4 +401,21 @@ describe("friendly search behavior", () => {
     expect(index.search("", { limit: 0, unknown: true } as OkfSearchOptions))
       .toEqual([]);
   });
+
+  it("turns synchronous save validation into Promise rejection", async () => {
+    const index = createOkfSearch([{
+      path: "present.md",
+      markdown: concept("type: note", "save-healthy"),
+    }]);
+    const pending = index.save("");
+
+    expect(pending).toBeInstanceOf(Promise);
+    await expect(pending).rejects.toMatchObject({
+      name: "OkfError",
+      code: "ERR_OKF_FIELD",
+      path: "",
+      field: "path",
+    });
+    expect(index.search("save-healthy")).toHaveLength(1);
+  });
 });

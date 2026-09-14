@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { createInterface } from "node:readline";
+import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -324,6 +327,209 @@ test("prepared search option getters can reenter read-only native inventory", as
     cwd: packageRoot,
     timeout: 2_000,
   });
+});
+
+test("package API persists across fresh processes and preserves cache generations", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-persistence-api-"));
+  const sourceRoot = join(workspace, "source");
+  const missingRoot = join(workspace, "source-removed");
+  const cachePath = join(workspace, "nested", "cache", "collection.okf");
+  try {
+    await mkdir(sourceRoot, { recursive: true });
+    await writeFile(
+      join(sourceRoot, "first.md"),
+      markdown("note", "package-persistence-first"),
+    );
+    await writeFile(
+      join(sourceRoot, "second.md"),
+      markdown("guide", "package-persistence-second"),
+    );
+
+    const root = require("okf-search-native");
+    const index = await root.openOkf(sourceRoot, { cachePath });
+    assert.equal((await stat(cachePath)).isFile(), true);
+    assert.equal(index.search("package-persistence-first", { match: "all" }).length, 1);
+    assert.ok((await readdir(join(workspace, "nested", "cache")))
+      .some((entry) => entry !== "collection.okf"));
+
+    index.ingest({
+      path: "saved.md",
+      markdown: markdown("note", "package-persistence-saved"),
+    });
+    await index.save(cachePath);
+    index.ingest({
+      path: "unsaved.md",
+      markdown: markdown("note", "package-persistence-unsaved"),
+    });
+    await rm(sourceRoot, { recursive: true, force: true });
+
+    const freshReaderScript = `
+      const assert = require("node:assert/strict");
+      const { openOkf } = require(${JSON.stringify(join(packageRoot, "dist", "index.cjs"))});
+      (async () => {
+        const index = await openOkf(${JSON.stringify(missingRoot)}, {
+          cachePath: ${JSON.stringify(cachePath)},
+        });
+        assert.equal(index.search("package-persistence-first", { match: "all" }).length, 1);
+        assert.equal(index.search("package-persistence-first", { match: "all" })[0].path, "first.md");
+        assert.equal(index.search("package-persistence-saved", { match: "all" }).length, 1);
+        assert.equal(index.search("package-persistence-unsaved", { match: "all" }).length, 0);
+        assert.equal(index.indexStats().logical.documents.total, 3);
+        index.ingest({
+          path: "child.md",
+          markdown: "---\\ntype: child\\n---\\npackage-persistence-child\\n",
+        });
+        await index.save(${JSON.stringify(cachePath)});
+      })().catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+    `;
+    await execFileAsync(process.execPath, ["-e", freshReaderScript], {
+      cwd: packageRoot,
+      timeout: 10_000,
+    });
+
+    const afterChild = await root.openOkf(missingRoot, { cachePath });
+    assert.equal(afterChild.search("package-persistence-child", { match: "all" }).length, 1);
+    assert.equal(afterChild.search("package-persistence-unsaved", { match: "all" }).length, 0);
+
+    const bytes = await readFile(cachePath);
+    await writeFile(cachePath, bytes.subarray(0, Math.max(1, Math.floor(bytes.length / 2))));
+    const corruptScript = `
+      const assert = require("node:assert/strict");
+      const { openOkf } = require(${JSON.stringify(join(packageRoot, "dist", "index.cjs"))});
+      (async () => {
+        await assert.rejects(
+          openOkf(${JSON.stringify(missingRoot)}, { cachePath: ${JSON.stringify(cachePath)} }),
+          (error) => error && error.code === "ERR_OKF_CACHE_INVALID" &&
+            error.path === ${JSON.stringify(cachePath)},
+        );
+      })().catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+    `;
+    await execFileAsync(process.execPath, ["-e", corruptScript], {
+      cwd: packageRoot,
+      timeout: 10_000,
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("package API rejects overlapping writers and allows retry", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-busy-api-"));
+  const cachePath = join(workspace, "cache", "busy.okf");
+  try {
+    const root = require("okf-search-native");
+    const index = root.createOkfSearch(
+      Array.from({ length: 10 }, (_, document) => ({
+        path: `document-${document}.md`,
+        markdown: markdown(
+          "note",
+          `busy-package-marker-${document} ${"payload ".repeat(20_000)}`,
+        ),
+      })),
+    );
+    const results = await Promise.allSettled([
+      index.save(cachePath),
+      index.save(cachePath),
+    ]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.equal(rejected[0].reason.code, "ERR_OKF_CACHE_BUSY");
+    assert.equal(rejected[0].reason.path, cachePath);
+    await index.save(cachePath);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("public child and worker APIs reject a held writer claim, read the old cache, and retry", { timeout: 660_000 }, async () => {
+  // Reuse the Rust test-only pre-publication barrier. No timing race, addon
+  // hook, or platform-specific external locking utility is needed.
+  const { stdout } = await execFileAsync("cargo", [
+    "test", "--locked", "--no-run", "--message-format=json",
+  ], { cwd: packageRoot, timeout: 600_000, maxBuffer: 10 * 1024 * 1024 });
+  const artifact = stdout.trim().split("\n").map((line) => JSON.parse(line))
+    .find((message) => message.reason === "compiler-artifact" &&
+      message.profile.test && message.executable);
+  assert.ok(artifact?.executable, "Rust test executable must be available");
+  const workspace = await mkdtemp(join(tmpdir(), "okf-public-writer-"));
+  const cachePath = join(workspace, "cache.okf");
+  const missingRoot = join(workspace, "missing");
+  let holder;
+  let holderExit;
+  try {
+    const { createOkfSearch } = require("okf-search-native");
+    await createOkfSearch([{ path: "old.md", markdown: markdown("note", "oldgeneration") }]).save(cachePath);
+    holder = spawn(artifact.executable, [
+      "--exact", "persistence::tests::persistence_process_writer_helper", "--nocapture",
+    ], {
+      cwd: packageRoot,
+      env: { ...process.env, OKF_TEST_CHILD_CACHE: cachePath },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    holderExit = once(holder, "exit");
+    const lines = createInterface({ input: holder.stdout });
+    const barrier = (async () => {
+      for await (const line of lines) {
+        if (line.includes("OKF_CHILD_BEFORE_PUBLISH")) return;
+      }
+      throw new Error("writer exited before publication barrier");
+    })();
+    let timer;
+    try {
+      await Promise.race([barrier, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("writer barrier timed out")), 15_000);
+      })]);
+    } finally {
+      clearTimeout(timer);
+      lines.close();
+    }
+    const script = (busy) => `
+      const assert = require("node:assert/strict");
+      const { createOkfSearch, openOkf, OkfError } = require("okf-search-native");
+      (async () => {
+        const cachePath = ${JSON.stringify(cachePath)};
+        const loaded = await openOkf(${JSON.stringify(missingRoot)}, { cachePath });
+        assert.equal(loaded.search("oldgeneration").length, 1);
+        const writer = createOkfSearch([{ path: "old.md", markdown: "---\\ntype: note\\n---\\noldgeneration" }]);
+        ${busy ? `await assert.rejects(writer.save(cachePath),
+          error => error instanceof OkfError && error.code === "ERR_OKF_CACHE_BUSY" && error.path === cachePath);`
+          : "await writer.save(cachePath);"}
+      })()
+    `;
+    const runBoth = async (busy) => {
+      await execFileAsync(process.execPath, ["-e", `${script(busy)}.catch(error => { console.error(error); process.exitCode = 1; });`], {
+        cwd: packageRoot, timeout: 10_000,
+      });
+      const worker = new Worker(`${script(busy)}.catch(error => { throw error; });`, { eval: true });
+      const timeout = setTimeout(() => { void worker.terminate(); }, 10_000);
+      try {
+        const [code] = await once(worker, "exit");
+        assert.equal(code, 0);
+      } finally {
+        clearTimeout(timeout);
+        await worker.terminate();
+      }
+    };
+    await runBoth(true);
+    holder.kill();
+    await holderExit;
+    holder = undefined;
+    await runBoth(false);
+  } finally {
+    if (holder) {
+      holder.kill();
+      await holderExit;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("the physical generated loader is blocked by the export map", async () => {
