@@ -1,435 +1,183 @@
 # `okf-search-native`
 
 Search [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/open-knowledge-format)
-collections from Node.js with an in-memory native index. The raw API accepts
-OKF Markdown files or strings, prepares each document into searchable sections,
-and returns the highest-ranked matching section for each document.
+Markdown collections at native speed from Node.js, powered by Rust and Tantivy.
+Get the best matching section from each document, with its source path, line
+numbers, and snippet.
 
-Most applications should start with the package-root API; the quick start below
-opens a collection.
-
-## Requirements and install
-
-Requires Node.js `>=22.19.0`; TypeScript declarations are included. Prebuilt
-artifacts are available for macOS x64/arm64, Linux x64 (glibc >= 2.17), and
-Windows x64 (experimental). See [tested platforms](#requirements-and-tested-platforms)
-for the full matrix.
+## Install
 
 ```sh
 npm install okf-search-native
 ```
 
-## Quick start: open a collection
+Requires Node.js `>=22.19.0`. Includes TypeScript declarations and native
+binaries for macOS x64/arm64 and Linux x64 (glibc >= 2.17); Windows x64 is
+experimental. Browsers and Alpine/musl are not supported.
+See the [full platform list](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#requirements-and-tested-platforms).
 
-Create a minimal indexable OKF document:
+## Search a collection
 
-```sh
-mkdir -p knowledge/guides
-cat > knowledge/guides/memory.md <<'EOF'
----
-type: note
----
-# Memory safety
+Given a directory of OKF Markdown files at `./knowledge`:
 
-Memory safety keeps this guide useful.
-EOF
-```
-
-Open the directory, search it, and display each hit's source path and snippet:
-
-```sh
-node --input-type=module <<'EOF'
+```js
 import { openOkf } from "okf-search-native";
 
 const index = await openOkf("./knowledge");
-for (const hit of index.search("memory safety")) {
-  console.log(`${hit.path}:${hit.startLine}-${hit.endLine}`);
-  console.log(hit.headingPath);
-  console.log(hit.snippet);
+const hits = index.search("rollback deployment");
+
+for (const hit of hits) {
+  console.log(hit.path, hit.headingPath, hit.snippet);
 }
-EOF
 ```
 
-`openOkf` recursively reads files whose names end in lowercase `.md`. Files
-named exactly `index.md` or `log.md` are reserved and are not indexed.
+To try this with one document, save the following as
+`knowledge/runbooks/deployment.md` before running the example:
 
-## In-memory Markdown
+```markdown
+---
+type: runbook
+---
+# Deployment
 
-Use the synchronous `createOkfSearch` when the Markdown is supplied by your application:
+## Rollback
+
+To rollback a deployment, restore the previous release and check service health.
+```
+
+The result points to the rollback section (selected fields shown):
+
+```js
+{
+  path: "runbooks/deployment.md",
+  headingPath: "Deployment > Rollback",
+  startLine: 6,
+  endLine: 8,
+  snippet: "To rollback a deployment, restore the previous release and check service health."
+}
+```
+
+Use the path and line numbers to open the source, and the heading and snippet
+to display a preview. Results contain at most one hit per document, ordered by
+relevance. See the [complete result shape](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#results).
+
+**Open once and reuse the handle.** Opening reads and indexes the collection
+into memory; every new `openOkf` call rebuilds it. The handle does not watch
+files, write changes to disk, or persist the index. Reopen to pick up filesystem
+changes.
+
+`openOkf` recursively reads lowercase `.md` files, excluding files named exactly
+`index.md` or `log.md`.
+
+## Already have Markdown strings?
+
+Use `createOkfSearch` instead of reading a directory. It builds the same kind
+of handle synchronously:
 
 ```js
 import { createOkfSearch } from "okf-search-native";
 
 const index = createOkfSearch([{
-  path: "notes/memory.md",
-  markdown: `---
-type: note
----
-# Memory safety
-
-Memory safety keeps this guide useful.
-`,
+  path: "runbooks/deployment.md",
+  markdown: "---\ntype: runbook\n---\nTo rollback a deployment, restore the previous release.\n",
 }]);
 
-const hits = index.search("memory safety", {
-  fields: ["heading", "body"],
-});
-console.log(hits.map(({ path, headingPath, snippet }) => ({
-  path,
-  headingPath,
-  snippet,
-})));
+const hits = index.search("rollback deployment");
 ```
 
-## Search
+## Refine a search
 
-`search(query, options?)` trims and tokenizes the query. Queries with no terms
-return `[]`. Matching is case-insensitive for searchable text fields.
-
-| Option | Default | Behavior |
-| --- | --- | --- |
-| `limit` | `10` | Maximum number of returned documents. Must be a finite, non-negative integer; `0` returns `[]`. |
-| `match` | `"any"` | `"any"` matches at least one query term; `"all"` requires every term across the selected fields of one section. |
-| `fields` | All eight fields | Search `resource`, `title`, `heading`, `description`, `tags`, `type`, `sources`, and `body`. The array must be non-empty. |
-| `boost` | See below | Set a field's ranking weight. Values must be between `0.1` and `10`, inclusive. |
-| `fuzzy` | `false` | `true` uses ratio `0.2`; a number may be any finite value from `0` to `1`. |
-| `where` | No filters | Filter by metadata, staleness, or conformance. Multiple filter properties are combined. |
-| `asOf` | Current time | The `Date` used to evaluate `where.stale`. |
-
-Default boosts: `resource: 6`, `title: 5`, `heading: 4`, `description: 3`,
-`tags: 2`, `type: 1.5`, `sources: 1`, `body: 1`.
-Override individual weights with, for example, `boost: { body: 2 }`.
-
-`where` supports `types`, `tagsAny`, `statuses`, `trustTiers`, `stale`, and
-`conformance`. `statuses` accepts `draft`, `stable`, or `deprecated`;
-`trustTiers` accepts `unverified`, `machine-confirmed`, or `human-reviewed`; and
-`conformance` accepts `strict` or `degraded`.
-
-Using the handle from either example above:
+Require all query terms and restrict results to runbooks:
 
 ```js
-const filteredHits = index.search("memory safety", {
-  limit: 5,
+index.search("rollback deployment", {
   match: "all",
-  fields: ["title", "heading", "body"],
-  where: {
-    types: ["note"],
-    stale: false,
-    conformance: ["strict"],
-  },
-  asOf: new Date("2026-08-24T12:00:00Z"),
+  where: { types: ["runbook"] },
 });
-console.log(filteredHits.map(({ path, snippet }) => ({ path, snippet })));
 ```
 
-Type, tag, status, trust-tier, and conformance values are exact and
-case-sensitive. Values within one filter array are alternatives (OR); filter
-properties are combined with AND. Empty filter arrays impose no restriction.
-
-The final query term also gets prefix matching when it has at least three
-characters. For example, `"rollback proce"` can match `procedure`; earlier
-terms are never prefixes, and a one- or two-character final term is not a
-prefix. This prefix behavior remains enabled when fuzzy matching is `false`.
-
-<details>
-<summary>Staleness filter details</summary>
-
-`stale: true` selects classified documents whose `staleAfter` is at or before
-`asOf`. `stale: false` selects classified documents that are not stale at
-`asOf`; a classified document without a stale deadline matches this branch.
-Unclassified degraded documents match neither staleness branch.
-
-</details>
-
-<details>
-<summary>Fuzzy edit-distance details</summary>
-
-With fuzzy matching enabled, the backend adds edit-distance candidates. A
-numeric `fuzzy` value is a ratio: the allowed distance is rounded from
-`termLength * ratio` and clamped to one or two edits. `fuzzy: false` and
-`fuzzy: 0` disable those edit-distance candidates but do not disable final-term
-prefix matching. When fuzzy matching is enabled, the final-term prefix query
-uses the same edit distance.
-
-</details>
-
-### Results
-
-Search returns `OkfSearchHit[]`, with at most one hit per document. Each hit
-represents the highest-ranked matching section and has this shape:
-
-```ts
-{
-  documentId: string;
-  title: string;
-  sectionId: string;
-  score: number;
-  conformance: "strict" | "degraded";
-  matchedFields: OkfSearchField[];
-  headingPath: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-  snippet: string;
-}
-```
-
-`matchedFields` lists the selected fields that matched. `headingPath` and the
-line bounds identify the section; `snippet` is text from that section.
-
-## Update and reuse the handle
-
-Use the same handle for repeated searches and updates:
+Enable typo tolerance:
 
 ```js
-const result = index.ingest({
-  path: "notes/new.md",
-  markdown: "---\ntype: note\n---\nNew material.\n",
-});
-
-if (result.conformance === "strict") {
-  console.log(result.document.id);
-} else {
-  console.warn(result.documentId, result.path, result.diagnostics);
-}
-
-const removed = index.remove("notes/new.md");
-console.log(removed); // true when the document was present
+index.search("deploymnt", { fuzzy: true });
 ```
 
-`ingest` adds or replaces one document after successful preparation. A strict
-result is `{ conformance: "strict", document }`; a degraded result is
-`{ conformance: "degraded", documentId, path, diagnostics }`. Both operations
-use a relative POSIX path ending in lowercase `.md`. `remove` returns a boolean
-and normalizes its path the same way.
+By default, searches return up to ten documents, match any query term across
+all searchable fields, and disable fuzzy matching. The final term still
+matches prefixes when it has at least three characters: `"deploy"` can match
+`"deployment"`, even with `fuzzy: false`.
 
-<details>
-<summary>Path normalization and rejection rules</summary>
+Use `limit` to change the result count and `fields` to restrict where terms
+match. Filters also support tags, status, trust tier, staleness, and conformance.
+See [search options and defaults](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#search)
+for field boosts, filter combinations, and detailed matching rules.
 
-Paths are logical identities, not filesystem lookups. The normalizer:
+## Update the in-memory index
 
-- removes internal empty and exact `.` segments;
-- preserves case and literal backslashes;
-- rejects empty or dot-only paths, POSIX absolute paths, drive-prefixed or
-  UNC-looking paths, every exact `..` segment, and trailing `/` or `/.`;
-- requires the final component to end in lowercase `.md` and not be exactly
-  `index.md` or `log.md`;
-- removes `.md` from the normalized path to form the document ID.
+`ingest` adds a document or replaces the document with the same path. `remove`
+returns whether the document was present. Neither operation changes files:
 
-These checks happen before Markdown parsing or index mutation. The normalized
-path is used for document and record IDs, stored/search-hit paths, replacement
-lookup, and later parse diagnostics. Metadata and body-link values are inert;
-for example, `resource: ../target` is accepted as data.
+```js
+index.ingest({
+  path: "runbooks/restart.md",
+  markdown: "---\ntype: runbook\n---\nRestart the service after draining active requests.\n",
+});
 
-</details>
+index.remove("runbooks/restart.md");
+```
 
-The index never writes source files, watches the directory, or persists an
-index to disk. `remove` changes only the current index. To see filesystem
-changes, call `openOkf` again; it rebuilds a new handle from the files on disk.
-A preparation failure in `ingest` leaves an existing document unchanged, so a
-corrected replacement can be retried on the same usable handle.
+Use relative `.md` paths, such as `runbooks/restart.md`. If preparation of a
+replacement fails, the existing document remains searchable.
+See [update results and path rules](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#update-and-reuse-the-handle).
 
-## Validation and failures
+## Check documents and handle failures
 
-`validateOkfDocument` returns diagnostics without changing an index:
+Documents with valid OKF metadata are **strict**. Some metadata problems make
+a document **degraded**: it remains searchable, with diagnostics explaining
+what needs repair. Fatal problems, such as missing required `type` metadata,
+prevent indexing.
+
+Constructors and `ingest` validate automatically. To inspect diagnostics before
+indexing, use `validateOkfDocument`:
 
 ```js
 import { validateOkfDocument } from "okf-search-native";
 
 const input = {
-  path: "draft.md",
-  markdown: "---\ntype: note\nstatus: not-a-status\n---\nDraft\n",
+  path: "runbooks/draft.md",
+  markdown: "---\ntype: runbook\nstatus: not-a-status\n---\nDraft deployment instructions.\n",
 };
 const validation = validateOkfDocument(input);
 
-if (!validation.isIndexable) {
-  throw new Error("Fix fatal diagnostics before indexing");
+for (const { path, field, message } of validation.errors) {
+  console.warn(path, field, message);
 }
 
-for (const diagnostic of validation.errors) {
-  console.error(
-    `${diagnostic.code} ${diagnostic.path}` +
-      (diagnostic.field ? ` (${diagnostic.field})` : "") +
-      `: ${diagnostic.message}`,
-  );
+if (validation.isIndexable) {
+  index.ingest(input); // Degraded documents can still be indexed.
 }
 ```
 
-The exported [`OkfValidationResult`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/src/types.ts#L97-L112)
-discriminates these outcomes; each error uses the exported
-[`OkfDiagnostic`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/src/types.ts#L90-L95) type.
+Validation returns expected document problems as diagnostics. Indexing rejects
+fatal document problems with `OkfError`; `openOkf` also rejects unreadable
+files. Invalid search options throw `TypeError`. An `ERR_OKF_INDEX_UNUSABLE`
+error means the handle must be rebuilt, not retried.
+See [validation outcomes and error handling](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#validation-and-failures).
 
-- Strict input returns `isValid: true`, `isIndexable: true`, and no errors.
-- Degraded input returns `isValid: false`, `isIndexable: true`, and diagnostics;
-  it remains searchable.
-- Fatal path, parsing, Markdown, or required `type` problems return
-  `isIndexable: false` and must be fixed before indexing.
-
-See the [OKF v0.2 specification](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/ad30107c31c06aec8a7d5636e0d1058118604e6f/SPEC.md)
-for the document format and field semantics.
-
-Expected preparation failures from `createOkfSearch` or `ingest` throw
-`OkfError`. A failed constructor returns no handle; a failed preparation during
-`ingest` leaves the handle usable:
+To inspect an existing collection:
 
 ```js
-import { OkfError } from "okf-search-native";
-
-try {
-  index.ingest({ path: "broken.md", markdown: "not frontmatter" });
-} catch (error) {
-  if (
-    error instanceof OkfError &&
-    (error.code === "ERR_OKF_PARSE" || error.code === "ERR_OKF_FIELD")
-  ) {
-    console.error({
-      code: error.code,
-      path: error.path,
-      field: error.field,
-      message: error.message,
-    });
-    // Correct the Markdown or field and call index.ingest(...) again.
-  } else {
-    throw error;
-  }
-}
-```
-
-`OkfError` codes are `ERR_OKF_READ`, `ERR_OKF_PARSE`, `ERR_OKF_FIELD`,
-`ERR_OKF_INDEX_UNUSABLE`, and `ERR_OKF_UNSUPPORTED`. Filesystem failures from
-`openOkf` use `ERR_OKF_READ` and include the failing `path` and, when available,
-a `cause`. Invalid search options are `TypeError`, not `OkfError`; for example,
-`search("x", { limit: -1 })` reports that `options.limit` must be a finite
-non-negative integer. If a native mutation failure makes a handle unusable,
-subsequent calls report `ERR_OKF_INDEX_UNUSABLE`; rebuild the handle from the
-source documents.
-
-## Inspect the collection
-
-```js
+console.log(index.indexStats().logical.documents.total);
 console.log(index.listTypes());
 console.log(index.listDegradedDocuments());
-console.log(index.indexStats());
 ```
 
-`listTypes()` returns sorted type names. `listDegradedDocuments()` returns
-sorted `{ documentId, path, diagnostics }` entries. `indexStats()` returns a
-detached, recursively frozen snapshot from a package-root handle:
+## Reference and development
 
-<details>
-<summary>Full <code>OkfIndexStats</code> return shape</summary>
-
-```ts
-{
-  logical: {
-    documents: {
-      total: number;
-      strict: number;
-      degraded: number;
-    };
-    types: readonly {
-      type: string;
-      documentCount: number;
-    }[];
-    statuses: {
-      draft: number;
-      stable: number;
-      deprecated: number;
-      unclassified: number;
-    };
-    trustTiers: {
-      unverified: number;
-      machineConfirmed: number;
-      humanReviewed: number;
-      unclassified: number;
-    };
-  };
-  storage: {
-    kind: "in-memory-index-files";
-    sizeInBytes: number;
-  };
-}
-```
-
-</details>
-
-Logical values count documents, not sections, and change only after a
-successful `ingest` or `remove`. `types` preserves case and is sorted by type.
-Missing effective status or trust-tier metadata counts as `unclassified`.
-`sizeInBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
-process memory and can change without a logical change.
-
-## Advanced: prepared API
-
-Use the prepared API when your application already has `PreparedDocument`
-values and wants to pass them directly to the native backend:
-
-```js
-import { NativeOkfSearch } from "okf-search-native/prepared";
-
-// These values come from your existing preparation pipeline.
-const index = NativeOkfSearch.fromPrepared(preparedDocuments);
-const hits = index.search("memory", { limit: 10, fields: ["body"] });
-index.ingestPrepared(preparedDocument); // replaces that document's sections
-index.removeDocument("docs/old"); // takes a document ID, not a path
-```
-
-`PreparedDocument` contains document-wide metadata once. Each
-`PreparedSection` contains its ID, heading path, text, and line bounds. The
-complete DTO declarations are published in [`native.d.cts`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/native.d.cts) and
-are exported from `okf-search-native/prepared`, not from the package root.
-`ingestPrepared` returns `void`; `removeDocument` returns whether the document
-ID was present. The prepared API's `indexStats()` has the same shape above but
-returns a mutable N-API DTO; the package-root adapter returns the frozen copy.
-
-## Backend differences
-
-The native backend uses Tantivy, so its ranking, scores, snippets, and fuzzy
-candidates can differ from `okf-minisearch`. Browser use is not supported.
-`autoSuggest` is also unsupported and the package-root handle throws an
-`OkfError` with code `ERR_OKF_UNSUPPORTED`.
-
-## Requirements and tested platforms
-
-Linux x64 and macOS x64/arm64 are fully supported. Windows x64 is experimental.
-All targets require Node.js `>=22.19.0` and use Node-API 8.
-
-| Platform | Native artifact |
-| --- | --- |
-| macOS x64 | `okf-search-native.darwin-x64.node` |
-| macOS arm64 | `okf-search-native.darwin-arm64.node` |
-| Windows x64 (MSVC) | `okf-search-native.win32-x64-msvc.node` |
-| Linux x64 (glibc >= 2.17) | `okf-search-native.linux-x64-gnu.node` |
-
-Linux musl/Alpine, Linux arm64, Windows arm64, Bun, Deno, browsers, and other
-Node versions are not covered by this matrix.
-
-## Development
-
-Development requires Rust `1.88.0`:
-
-```sh
-pnpm install
-pnpm --filter okf-search-native run build
-pnpm --filter okf-search-native run check:rust
-pnpm --filter okf-search-native run test
-```
-
-<details>
-<summary>Maintainer build and release details</summary>
-
-`napi build` generates `native.cjs`, `native.d.cts`, and the host `.node`
-artifact. The package facade build writes `dist/index.cjs`, `dist/index.mjs`,
-`dist/index.d.cts`, `dist/index.d.mts`, and `dist/index.d.ts`. Generated native
-loader names are internal and are not package-root exports.
-
-For multi-target candidate assembly, copy the four tested `.node` files into the
-package root, then run `pnpm run verify:release-artifacts`. The verifier derives
-the required artifact names from the checked-in target list and rejects missing
-or extra native files. CI also uses its `glibc <artifact>` mode to reject Linux
-addons that import symbols newer than `GLIBC_2.17`.
-
-</details>
+- [API reference](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md): options, return values, errors, and index statistics.
+- [Prepared API](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#advanced-prepared-api): for applications that already produce prepared documents.
+- [Backend differences](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#backend-differences): Tantivy ranking differs from `okf-minisearch`; `autoSuggest` is unsupported.
+- [Development](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/DEVELOPMENT.md): local builds, tests, and release artifacts.
 
 ## License
 
