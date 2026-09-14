@@ -66,15 +66,23 @@ pub(super) fn prepare(
     preparation::prepare_normalized(identity, &markdown)
 }
 
+pub(super) fn validate(
+    input: (Utf16String, Utf16String),
+) -> std::result::Result<core::Validation, PreparationError> {
+    let identity = identity(input.0)?;
+    let markdown = decode(&input.1, "ERR_OKF_PARSE", &identity.path, None)?;
+    Ok(preparation::validate_normalized(identity, &markdown))
+}
+
 pub(super) fn validate_raw(env: Env, input: Object<'_>) -> Result<Object<'static>> {
-    let outcome = prepare(snapshot(input)?);
+    let outcome = validate(snapshot(input)?);
     let mut value = Object::new(&env)?;
     let (valid, indexable, diagnostics) = match outcome {
-        Ok(PreparedEntry {
-            prepared: Prepared::Accepted { diagnostics, .. },
-            ..
-        }) => (diagnostics.is_empty(), true, diagnostics),
-        Ok(_) => unreachable!(),
+        Ok(core::Validation {
+            is_valid,
+            is_indexable,
+            errors,
+        }) => (is_valid, is_indexable, errors),
         Err(mut error) => {
             if error.diagnostics.is_empty() {
                 error.diagnostics.push(core::Diagnostic {

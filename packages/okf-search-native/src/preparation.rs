@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, error::Error, fmt};
 
-use okf_prepare_core::{Diagnostic, Input, Prepared};
+use okf_prepare_core::{Diagnostic, Input, Prepared, Validation};
 
 #[derive(Debug, PartialEq)]
 pub(super) struct DocumentInput {
@@ -234,6 +234,14 @@ pub(super) fn prepare_batch(
     .collect()
 }
 
+pub(super) fn validate_normalized(identity: Identity, markdown: &str) -> Validation {
+    okf_prepare_core::validate(Input {
+        path: &identity.path,
+        markdown,
+        fallback_title: &fallback_title(&identity.document_id),
+    })
+}
+
 pub(super) fn prepare_normalized(
     identity: Identity,
     markdown: &str,
@@ -328,6 +336,46 @@ mod tests {
             assert_eq!(single.field, batch.field);
             assert_eq!(single.diagnostics, batch.diagnostics);
             assert!(single.cause.is_none());
+        }
+    }
+
+    #[test]
+    fn normalized_validation_matches_prior_preparation_for_all_outcomes() {
+        for (outcome, markdown) in [
+            (
+                "strict",
+                "---\ntype: note\n---\n# Heading\nBody\n\n## Nested\nMore body",
+            ),
+            (
+                "degraded",
+                "---\ntype: note\nstatus: future\n---\n# Heading\nBody",
+            ),
+            (
+                "invalid type",
+                "---\ntitle: 12\ntype: 42\n---\n# Heading\nBody",
+            ),
+            ("parse fatal", "---\ntype: [\n"),
+        ] {
+            let expected = match prepare_normalized(
+                normalize_identity("folder/fallback-title.md").unwrap(),
+                markdown,
+            ) {
+                Ok(PreparedEntry {
+                    prepared: Prepared::Accepted { diagnostics, .. },
+                    ..
+                }) => (diagnostics.is_empty(), true, diagnostics),
+                Err(error) => (false, false, error.diagnostics),
+                Ok(_) => panic!("unexpected fatal preparation for {outcome}"),
+            };
+            let actual = validate_normalized(
+                normalize_identity("folder/fallback-title.md").unwrap(),
+                markdown,
+            );
+            assert_eq!(
+                (actual.is_valid, actual.is_indexable, actual.errors),
+                expected,
+                "{outcome}"
+            );
         }
     }
 
