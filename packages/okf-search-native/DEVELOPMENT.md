@@ -28,7 +28,9 @@ addons that import symbols newer than `GLIBC_2.17`.
 round trips, mutation capture, corrupt-cache rejection, atomic readers, and
 writer exclusion. `tests/package-api.test.mjs` repeats the essential cache hit,
 miss, fresh-process, replacement, and corruption cases through the built CJS
-package; run it on every supported OS artifact.
+package. The native-artifact CI matrix runs the full `pnpm run test` suite on
+every supported OS artifact with `CARGO_BUILD_TARGET` set to that row's target,
+so Rust test helpers and the loaded addon use the same architecture.
 
 Persistence writes one opaque cache payload plus a retained sibling lock file
 (`.<basename>.okf-lock`) and temporary siblings during publication. The lock

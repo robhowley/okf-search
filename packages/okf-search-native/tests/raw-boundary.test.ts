@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -140,7 +140,13 @@ describe("native raw preparation boundary", () => {
     try {
       const library = process.platform === "darwin" ? "libokf_search_native.dylib" : process.platform === "win32" ? "okf_search_native.dll" : "libokf_search_native.so";
       const addon = join(temporary, "fixture.node");
-      copyFileSync(join(root, "target/debug", library), addon);
+      const targetDirectory = process.env.CARGO_TARGET_DIR
+        ? resolve(root, process.env.CARGO_TARGET_DIR)
+        : join(root, "target");
+      const debugDirectory = process.env.CARGO_BUILD_TARGET
+        ? join(targetDirectory, process.env.CARGO_BUILD_TARGET, "debug")
+        : join(targetDirectory, "debug");
+      copyFileSync(join(debugDirectory, library), addon);
       const { createPoisonedSearchFixture } = createRequire(import.meta.url)(addon);
       const native: NativeOkfSearch = createPoisonedSearchFixture();
       // A genuine native error from a different handle is still a caller throw.
