@@ -35,7 +35,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "okf-search-native": "workspace:^0.3.3"
+    "okf-search-native": "workspace:^0.5.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

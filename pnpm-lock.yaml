@@ -76,7 +76,7 @@ importers:
   packages/pi-okf-search:
     dependencies:
       okf-search-native:
-        specifier: workspace:^0.3.3
+        specifier: workspace:^0.5.1
         version: link:../okf-search-native
     devDependencies:
       '@earendil-works/pi-ai':
