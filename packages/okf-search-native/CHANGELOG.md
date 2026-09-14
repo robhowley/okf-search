@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.5.0...okf-search-native-v0.5.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **okf-search-native:** skip section preparation during validation ([#87](https://github.com/robhowley/okf-search/issues/87)) ([95a4df9](https://github.com/robhowley/okf-search/commit/95a4df977a2accd31f17378f4bb03c304f3ad6a2))
+
 ## [0.5.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.4.0...okf-search-native-v0.5.0) (2026-09-14)
 
 
