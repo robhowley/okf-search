@@ -172,6 +172,45 @@ console.log(index.listTypes());
 console.log(index.listDegradedDocuments());
 ```
 
+## Performance benchmarks
+
+On a private `wiki-w-type` collection of 13,692 Markdown documents (59.57 MiB
+of source text), native opened about **9.9× faster** and used **79% less
+post-open resident memory** in this benchmark.
+
+| Metric | [okf-minisearch 2.3.0][benchmark-minisearch] | [okf-search-native 0.5.1][benchmark-native] |
+| --- | ---: | ---: |
+| Median `openOkf` time | 21.85 s | 2.21 s |
+| Warm query p50 | 11.05 ms | 1.33 ms |
+| Warm query p95 | 87.02 ms | 2.32 ms |
+| Median post-open RSS | 2,417 MiB | 502 MiB |
+| Median peak RSS | 3,138 MiB | 590 MiB |
+
+[benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-minisearch/package.json
+[benchmark-native]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-search-native/package.json
+
+Measured September 14, 2026 on macOS arm64 with Node.js 24.15.0. Both packages
+were built locally from commit `db885cb850e986e99bd9f5117e390d89ea9cf90c`,
+with a release build for native, rather than installed from npm tarballs.
+
+- **Trials:** five fresh processes per backend, run sequentially in alternating
+  order. `openOkf` includes reading and indexing, but excludes module import;
+  filesystem caches were not cleared.
+- **Queries:** `ranking`, `native search`, `state machine`, `the`, `tantivy`,
+  `https`, `stable`, `method`, and `shopify`, using `index.search(query)` with
+  default options. Each query had 30 warmups and 200 timed calls per process;
+  query percentiles pool all nine queries across all five trials.
+- **Memory:** RSS is whole-process resident memory, including native allocations,
+  not just the JavaScript heap. Post-open RSS was sampled after `indexStats()`
+  and two forced garbage collections. MiniSearch's stats calculation serializes
+  its index and can affect retained memory. Peak RSS covers startup, stats, and
+  searches, not just the index; no forced GC ran during timed searches.
+- **Scope:** this is one corpus and query mix, not a universal speedup. MiniSearch
+  was faster for `tantivy` and `stable`. Document counts and result shapes were
+  checked, but equivalent hits and ranking were not. The private corpus is not
+  distributed, so these results are not independently reproducible from this
+  repository alone.
+
 ## Reference and development
 
 - [API reference](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md): options, return values, errors, and index statistics.
