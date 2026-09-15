@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use tantivy::directory::Directory;
 
 const MAGIC: &[u8; 8] = b"OKFCACHE";
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 const MAX_MANIFEST: usize = 64 * 1024 * 1024;
 // Allow framing overhead for incompressible JSON at the logical limit.
 const MAX_ENCODED_MANIFEST: usize = 65 * 1024 * 1024;
@@ -131,10 +131,81 @@ impl Drop for WriterGuard {
 struct Manifest {
     compatibility: String,
     #[serde(deserialize_with = "unique_map")]
-    documents: BTreeMap<String, DocumentState>,
+    documents: BTreeMap<String, PersistedDocument>,
     #[serde(deserialize_with = "unique_map")]
     files: BTreeMap<String, u64>,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedDocument {
+    path: String,
+    document_type: String,
+    status: Option<String>,
+    trust_tier: Option<String>,
+    section_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    diagnostics: Vec<PersistedDiagnostic>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedDiagnostic {
+    code: String,
+    message: String,
+    field: Option<String>,
+}
+
+impl From<DocumentState> for PersistedDocument {
+    fn from(state: DocumentState) -> Self {
+        Self {
+            path: state.path,
+            document_type: state.document_type,
+            status: state.status,
+            trust_tier: state.trust_tier,
+            section_count: state.section_count,
+            diagnostics: state
+                .diagnostics
+                .into_iter()
+                .map(|d| PersistedDiagnostic {
+                    code: d.code,
+                    message: d.message,
+                    field: d.field,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl PersistedDocument {
+    fn into_state(self, document_id: String) -> DocumentState {
+        DocumentState {
+            document_id,
+            conformance: if self.diagnostics.is_empty() {
+                "strict"
+            } else {
+                "degraded"
+            }
+            .into(),
+            diagnostics: self
+                .diagnostics
+                .into_iter()
+                .map(|d| Diagnostic {
+                    code: d.code,
+                    message: d.message,
+                    field: d.field,
+                    path: self.path.clone(),
+                })
+                .collect(),
+            path: self.path,
+            document_type: self.document_type,
+            status: self.status,
+            trust_tier: self.trust_tier,
+            section_count: self.section_count,
+            section_ids: BTreeSet::new(),
+        }
+    }
+}
+
 fn unique_map<'de, D, V>(deserializer: D) -> std::result::Result<BTreeMap<String, V>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -220,11 +291,15 @@ impl Snapshot {
         let invalid = |e| error("ERR_OKF_CACHE_INVALID", &guard.supplied, e);
         let files = self.files().map_err(invalid)?;
         // Validate the detached committed generation, never the mutating live directory.
-        restore(&files, self.documents.clone())
+        restore(&files, self.documents.clone(), false)
             .map_err(|e| error("ERR_OKF_CACHE_INVALID", &guard.supplied, e))?;
         let manifest = Manifest {
             compatibility: COMPATIBILITY.into(),
-            documents: self.documents,
+            documents: self
+                .documents
+                .into_iter()
+                .map(|(id, state)| (id, state.into()))
+                .collect(),
             files: files
                 .iter()
                 .map(|(k, v)| (k.clone(), v.len() as u64))
@@ -401,14 +476,20 @@ fn decode_cache(bytes: &[u8], path: &str) -> Result<Engine> {
         return Err(bad("missing required file or trailing bytes"));
     }
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        restore(&files, manifest.documents)
+        let documents = manifest
+            .documents
+            .into_iter()
+            .map(|(id, state)| (id.clone(), state.into_state(id)))
+            .collect();
+        restore(&files, documents, true)
     }))
     .map_err(|_| bad("index decoder panicked on corrupt data"))?
     .map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))
 }
 fn restore(
     files: &BTreeMap<String, Vec<u8>>,
-    documents: BTreeMap<String, DocumentState>,
+    mut documents: BTreeMap<String, DocumentState>,
+    reconstruct_section_ids: bool,
 ) -> std::result::Result<Engine, EngineError> {
     let managed: BTreeSet<String> = serde_json::from_slice(
         files
@@ -476,7 +557,7 @@ fn restore(
                 )
             })
             || !paths.insert(&state.path)
-            || state.section_count != state.section_ids.len()
+            || (!reconstruct_section_ids && state.section_count != state.section_ids.len())
             || !matches!(state.conformance.as_str(), "strict" | "degraded")
         {
             return Err(EngineError::StoredInvariant("invalid inventory".into()));
@@ -490,22 +571,32 @@ fn restore(
             expected.insert((id.clone(), section.clone()));
         }
     }
+    drop(paths);
+    drop(owned);
+    // Save checks the original detached IDs; load rebuilds exact IDs from live records.
+    let mut live_ids = HashSet::new();
     for (segment_ord, segment) in searcher.segment_readers().iter().enumerate() {
         let mut records = BTreeMap::new();
         for doc in segment.doc_ids_alive() {
             let record = read_record(&searcher, &fields, DocAddress::new(segment_ord as u32, doc))?;
             let state = documents
-                .get(&record.document_id)
+                .get_mut(&record.document_id)
                 .ok_or_else(|| EngineError::StoredInvariant("unowned record".into()))?;
             if record.start_line == 0
                 || record.end_line < record.start_line
                 || record.path != state.path
                 || record.conformance != state.conformance
-                || !expected.remove(&(record.document_id.clone(), record.section_id.clone()))
+                || record.section_id.is_empty()
+                || (reconstruct_section_ids && !live_ids.insert(record.section_id.clone()))
+                || (!reconstruct_section_ids
+                    && !expected.remove(&(record.document_id.clone(), record.section_id.clone())))
             {
                 return Err(EngineError::StoredInvariant(
                     "record/inventory disagreement".into(),
                 ));
+            }
+            if reconstruct_section_ids {
+                state.section_ids.insert(record.section_id.clone());
             }
             records.insert(doc, record);
         }
@@ -540,7 +631,11 @@ fn restore(
             validate_terms(segment, field, values)?;
         }
     }
-    if !expected.is_empty() {
+    if !expected.is_empty()
+        || documents
+            .values()
+            .any(|state| state.section_count != state.section_ids.len())
+    {
         return Err(EngineError::StoredInvariant(
             "missing inventory records".into(),
         ));
@@ -770,12 +865,183 @@ mod tests {
         let mut state = DocumentState::from(&document("empty"));
         state.section_ids.clear();
         state.section_count = 0;
-        source.documents.insert(state.document_id.clone(), state);
+        source
+            .documents
+            .insert(state.document_id.clone(), state.clone());
+        state.document_id = "strict empty 雪".into();
+        state.path = "strict-empty.md".into();
+        state.document_type = "zero-only-type".into();
+        state.conformance = "strict".into();
+        state.diagnostics.clear();
+        state.status = Some("draft".into());
+        state.trust_tier = Some("unverified".into());
+        source
+            .documents
+            .insert(state.document_id.clone(), state.clone());
         save(&source, &path);
+        rewrite_manifest(&fs::read(&path).unwrap(), |m| {
+            assert!(
+                m["documents"][&state.document_id]
+                    .get("diagnostics")
+                    .is_none()
+            );
+        });
+        let mut restored = load(&path).unwrap().unwrap();
+        assert_eq!(inventory(&restored), inventory(&source));
+        assert_eq!(source.list_types().unwrap(), restored.list_types().unwrap());
         assert_eq!(
-            inventory(&load(&path).unwrap().unwrap()),
-            inventory(&source)
+            format!("{:?}", source.index_stats().unwrap().logical),
+            format!("{:?}", restored.index_stats().unwrap().logical)
         );
+        assert!(restored.remove(&state.document_id).unwrap());
+        assert!(restored.remove(&document("empty").document_id).unwrap());
+        assert!(restored.documents.is_empty());
+    }
+
+    #[test]
+    fn persistence_reduced_metadata_arbitrary_ids_diagnostics_and_collisions() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = destination(&temp);
+        let mut prepared = document("unrelated-path");
+        prepared.document_id = "owner 雪 / arbitrary".into();
+        for (i, section) in prepared.sections.iter_mut().enumerate() {
+            section.section_id = format!("independent λ {i}");
+        }
+        prepared.diagnostics = vec![
+            Diagnostic {
+                code: "ERR_OKF_FIELD".into(),
+                message: "custom second\n雪".into(),
+                field: Some("custom".into()),
+                path: prepared.path.clone(),
+            },
+            Diagnostic {
+                code: "ERR_OKF_PARSE".into(),
+                message: "custom first".into(),
+                field: None,
+                path: prepared.path.clone(),
+            },
+        ];
+        let source = Engine::new(vec![prepared.clone()]).unwrap();
+        save(&source, &path);
+        let bytes = fs::read(&path).unwrap();
+        rewrite_manifest(&bytes, |m| {
+            assert!(m.get("ownership_digest").is_none());
+            let state = &m["documents"][&prepared.document_id];
+            for omitted in ["document_id", "section_ids", "conformance"] {
+                assert!(state.get(omitted).is_none());
+            }
+            assert!(state["diagnostics"][0].get("path").is_none());
+            assert!(state["diagnostics"][1]["field"].is_null());
+        });
+        let mut restored = load(&path).unwrap().unwrap();
+        assert_eq!(inventory(&source), inventory(&restored));
+        let mut collision = document("other-path");
+        collision.sections[0].section_id = prepared.sections[0].section_id.clone();
+        assert!(matches!(
+            restored.ingest(collision),
+            Err(EngineError::Invalid(_))
+        ));
+        prepared.sections[0].text = "replacement searchable".into();
+        restored.ingest(prepared.clone()).unwrap();
+        save(&restored, &path);
+        let mut restored = load(&path).unwrap().unwrap();
+        assert!(restored.remove(&prepared.document_id).unwrap());
+        assert!(!restored.remove(&prepared.document_id).unwrap());
+    }
+
+    #[test]
+    fn persistence_original_snapshot_mismatch_never_publishes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = destination(&temp);
+        let source = engine("original");
+        save(&source, &path);
+        let original = fs::read(&path).unwrap();
+        for mismatch in 0..4 {
+            let mut snapshot = Snapshot::capture(&source);
+            let state = snapshot.documents.values_mut().next().unwrap();
+            match mismatch {
+                0 => {
+                    state.section_ids.pop_first();
+                    state.section_ids.insert("renamed".into());
+                }
+                1 => state.document_id = "different".into(),
+                2 => state.diagnostics[0].path = "different.md".into(),
+                _ => state.conformance = "strict".into(),
+            }
+            let guard = WriterGuard::acquire(&path).unwrap();
+            assert_eq!(
+                snapshot.publish(&guard).unwrap_err().code,
+                "ERR_OKF_CACHE_INVALID"
+            );
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+    }
+
+    // Build a checksum-valid payload without the production save-time validation.
+    fn unchecked_cache(source: &Engine) -> Vec<u8> {
+        let snapshot = Snapshot::capture(source);
+        let files = snapshot.files().unwrap();
+        let manifest = Manifest {
+            compatibility: COMPATIBILITY.into(),
+            documents: snapshot
+                .documents
+                .into_iter()
+                .map(|(id, state)| (id, state.into()))
+                .collect(),
+            files: files
+                .iter()
+                .map(|(name, bytes)| (name.clone(), bytes.len() as u64))
+                .collect(),
+        };
+        let json = serde_json::to_vec(&manifest).unwrap();
+        let encoded = zstd::bulk::compress(&json, 3).unwrap();
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&FORMAT.to_le_bytes());
+        bytes.extend_from_slice(&(encoded.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(json.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&encoded);
+        for file in files.values() {
+            bytes.extend_from_slice(file);
+        }
+        bytes.extend_from_slice(&[0; 32]);
+        resign(&mut bytes);
+        bytes
+    }
+
+    #[test]
+    fn persistence_reconstruction_rejects_duplicate_ids_unknown_owners_and_counts() {
+        for corruption in 0..4 {
+            let mut source = engine("first");
+            let mut extra = document(if corruption == 0 { "first" } else { "second" });
+            if corruption == 1 {
+                extra.sections[0].section_id = document("first").sections[0].section_id.clone();
+            }
+            add_document(&source.writer, &source.fields, &extra).unwrap();
+            source.writer.commit().unwrap();
+            if corruption != 2 {
+                if corruption == 0 {
+                    source
+                        .documents
+                        .get_mut(&extra.document_id)
+                        .unwrap()
+                        .section_count += extra.sections.len();
+                } else {
+                    source
+                        .documents
+                        .insert(extra.document_id.clone(), DocumentState::from(&extra));
+                }
+            }
+            if corruption == 3 {
+                source
+                    .documents
+                    .get_mut(&extra.document_id)
+                    .unwrap()
+                    .section_count += 1;
+            }
+            assert!(
+                matches!(decode_cache(&unchecked_cache(&source), "test"), Err(e) if e.code == "ERR_OKF_CACHE_INVALID")
+            );
+        }
     }
 
     #[test]
@@ -855,6 +1121,28 @@ mod tests {
         let changed = rewrite_manifest(&original, |m| m["compatibility"] = "new".into());
         fs::write(&path, changed).unwrap();
         assert_eq!(load_error(&path), "ERR_OKF_CACHE_INCOMPATIBLE");
+        for (field, value) in [
+            ("document_type", serde_json::json!("other")),
+            ("status", serde_json::json!("stable")),
+            ("trust_tier", serde_json::json!("human-reviewed")),
+            ("section_count", serde_json::json!(0)),
+            ("diagnostics", serde_json::json!([])),
+            ("section_ids", serde_json::json!([])),
+            ("document_id", serde_json::json!("obsolete")),
+            ("conformance", serde_json::json!("degraded")),
+        ] {
+            let changed = rewrite_manifest(&original, |m| {
+                let state = m["documents"]
+                    .as_object_mut()
+                    .unwrap()
+                    .values_mut()
+                    .next()
+                    .unwrap();
+                state[field] = value;
+            });
+            fs::write(&path, changed).unwrap();
+            assert_eq!(load_error(&path), "ERR_OKF_CACHE_INVALID", "{field}");
+        }
         for changed in [
             rewrite_manifest(&original, |m| {
                 m["documents"] = serde_json::json!({});

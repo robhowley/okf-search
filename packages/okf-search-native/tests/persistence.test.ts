@@ -290,16 +290,16 @@ stale_after: 2027-01-01T00:00:00Z`,
     expect((error as Error).message).not.toMatch(/source-is-missing/);
   });
 
-  it("rejects format 1 without rebuilding or replacing the cache", async () => {
+  it.each([1, 2])("rejects format %s without rebuilding or replacing the cache", async (format) => {
     const { root, directory } = await workspace();
     await writeCollection(root, {
       "source.md": concept("type: note", "old-format-marker"),
     });
     const cachePath = join(directory, "old.okf");
-    // Format 1's minimum envelope: magic, version, JSON length, JSON, digest.
-    const old = Buffer.alloc(54);
+    // Unsupported versions reject before decoding their differently shaped metadata.
+    const old = Buffer.alloc(60);
     old.write("OKFCACHE");
-    old.writeUInt32LE(1, 8);
+    old.writeUInt32LE(format, 8);
     old.writeBigUInt64LE(2n, 12);
     old.write("{}", 20);
     await writeFile(cachePath, old);
