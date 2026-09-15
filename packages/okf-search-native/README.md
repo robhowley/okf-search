@@ -225,7 +225,7 @@ console.log(index.listDegradedDocuments());
 
 ## Performance benchmarks
 
-On a private `wiki-w-type` collection of 13,692 Markdown documents (59.57 MiB
+On a sample OKF bundle of 13,692 Markdown documents (59.57 MiB
 of source text), native opened about **9.9× faster** and used **79% less
 post-open resident memory** in this benchmark.
 

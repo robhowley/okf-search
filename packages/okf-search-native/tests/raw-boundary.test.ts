@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -10,6 +10,8 @@ import { throwNativeError } from "../src/errors.js";
 import { createOkfSearch, OkfError, openOkf, validateOkfDocument } from "../src/index.js";
 
 const markdown = "---\ntype: note\n---\nNative needle 😀 �";
+const require = createRequire(import.meta.url);
+
 function failure(call: () => unknown): any {
   try { call(); } catch (error) { return error; }
   throw new Error("Expected failure");
@@ -20,6 +22,55 @@ function checkError(error: any, code: string, path: string, field?: string) {
   expect(Object.hasOwn(error, "field")).toBe(field !== undefined);
   if (field !== undefined) expect(error.field).toBe(field);
   expect(Object.hasOwn(error, "cause")).toBe(false);
+}
+
+function runPoisonFixture(root: string, addon: string): void {
+  const { createPoisonedSearchFixture } = require(addon);
+  const native: NativeOkfSearch = createPoisonedSearchFixture();
+  // A genuine native error from a different handle is still a caller throw.
+  const sentinel = failure(() => native.ingestRaw({ path: "a.md", markdown }));
+  expect(sentinel.message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
+  Object.defineProperty(sentinel, "path", { get() { throw new Error("error path getter touched"); } });
+  const healthyNative = NativeOkfSearch.fromRaw([]);
+  const healthy = wrapNative(healthyNative);
+  for (const field of ["path", "markdown"] as const) {
+    const throwing = { path: "a.md", markdown };
+    Object.defineProperty(throwing, field, { get() { throw sentinel; } });
+    expect(failure(() => createOkfSearch([throwing]))).toBe(sentinel);
+    expect(failure(() => healthy.ingest(throwing))).toBe(sentinel);
+    expect(failure(() => NativeOkfSearch.fromRaw([throwing]))).toBe(sentinel);
+    expect(failure(() => healthyNative.ingestRaw(throwing))).toBe(sentinel);
+    expect(healthy.ingest({ path: "recovery.md", markdown }).conformance).toBe("strict");
+    expect(healthy.remove("recovery.md")).toBe(true);
+  }
+  const iterable = [{ path: "a.md", markdown }];
+  iterable[Symbol.iterator] = function* () { yield iterable[0]!; throw sentinel; };
+  expect(failure(() => createOkfSearch(iterable))).toBe(sentinel);
+  expect(healthy.ingest({ path: "recovery.md", markdown }).conformance).toBe("strict");
+  expect(healthy.search("needle")).toHaveLength(1);
+  const calls: string[] = [];
+  const input = {
+    get path(): string { calls.push("path"); throw new Error("path getter touched"); },
+    get markdown(): string { calls.push("markdown"); throw new Error("markdown getter touched"); },
+  };
+  expect(failure(() => native.ingestRaw(input)).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
+  expect(calls).toEqual([]);
+  expect(failure(() => native.removePath("\ud800")).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
+  for (const method of ["search", "indexStats", "listTypes", "listDegradedDocuments"] as const) {
+    expect(failure(() => native[method]("needle")).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
+    const facade = wrapNative(native);
+    const projected = failure(() => facade[method]("needle"));
+    checkError(projected, "ERR_OKF_INDEX_UNUSABLE", "<index>");
+    expect(failure(() => facade.listTypes())).toBe(projected);
+  }
+  const index = wrapNative(native);
+  const first = failure(() => index.ingest(input));
+  checkError(first, "ERR_OKF_INDEX_UNUSABLE", "<index>");
+  expect(failure(() => index.ingest(input))).toBe(first);
+  expect(failure(() => index.remove("\ud800"))).toBe(first);
+  expect(failure(() => index.listTypes())).toBe(first);
+  expect(calls).toEqual([]);
+  expect("createPoisonedSearchFixture" in require(join(root, "native.cjs"))).toBe(false);
 }
 
 describe("native raw preparation boundary", () => {
@@ -133,6 +184,12 @@ describe("native raw preparation boundary", () => {
 
   it("native poison precedes getters and path validation, then the facade caches it", () => {
     const root = join(__dirname, "..");
+    const fixtureAddon = process.env.OKF_POISON_FIXTURE_ADDON;
+    if (fixtureAddon) {
+      runPoisonFixture(root, fixtureAddon);
+      return;
+    }
+
     const build = spawnSync("cargo", ["build", "--locked", "--features", "test-fixtures", "--quiet"], { cwd: root, encoding: "utf8" });
     expect(build.error).toBeUndefined();
     expect(build.status, build.stderr).toBe(0);
@@ -147,52 +204,20 @@ describe("native raw preparation boundary", () => {
         ? join(targetDirectory, process.env.CARGO_BUILD_TARGET, "debug")
         : join(targetDirectory, "debug");
       copyFileSync(join(debugDirectory, library), addon);
-      const { createPoisonedSearchFixture } = createRequire(import.meta.url)(addon);
-      const native: NativeOkfSearch = createPoisonedSearchFixture();
-      // A genuine native error from a different handle is still a caller throw.
-      const sentinel = failure(() => native.ingestRaw({ path: "a.md", markdown }));
-      expect(sentinel.message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
-      Object.defineProperty(sentinel, "path", { get() { throw new Error("error path getter touched"); } });
-      const healthyNative = NativeOkfSearch.fromRaw([]);
-      const healthy = wrapNative(healthyNative);
-      for (const field of ["path", "markdown"] as const) {
-        const throwing = { path: "a.md", markdown };
-        Object.defineProperty(throwing, field, { get() { throw sentinel; } });
-        expect(failure(() => createOkfSearch([throwing]))).toBe(sentinel);
-        expect(failure(() => healthy.ingest(throwing))).toBe(sentinel);
-        expect(failure(() => NativeOkfSearch.fromRaw([throwing]))).toBe(sentinel);
-        expect(failure(() => healthyNative.ingestRaw(throwing))).toBe(sentinel);
-        expect(healthy.ingest({ path: "recovery.md", markdown }).conformance).toBe("strict");
-        expect(healthy.remove("recovery.md")).toBe(true);
+      const childEnvironment = { ...process.env, OKF_POISON_FIXTURE_ADDON: addon };
+      for (const key of Object.keys(childEnvironment)) {
+        if (key.startsWith("VITEST")) delete childEnvironment[key];
       }
-      const iterable = [{ path: "a.md", markdown }];
-      iterable[Symbol.iterator] = function* () { yield iterable[0]!; throw sentinel; };
-      expect(failure(() => createOkfSearch(iterable))).toBe(sentinel);
-      expect(healthy.ingest({ path: "recovery.md", markdown }).conformance).toBe("strict");
-      expect(healthy.search("needle")).toHaveLength(1);
-      const calls: string[] = [];
-      const input = {
-        get path(): string { calls.push("path"); throw new Error("path getter touched"); },
-        get markdown(): string { calls.push("markdown"); throw new Error("markdown getter touched"); },
-      };
-      expect(failure(() => native.ingestRaw(input)).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
-      expect(calls).toEqual([]);
-      expect(failure(() => native.removePath("\ud800")).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
-      for (const method of ["search", "indexStats", "listTypes", "listDegradedDocuments"] as const) {
-        expect(failure(() => native[method]("needle")).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
-        const facade = wrapNative(native);
-        const projected = failure(() => facade[method]("needle"));
-        checkError(projected, "ERR_OKF_INDEX_UNUSABLE", "<index>");
-        expect(failure(() => facade.listTypes())).toBe(projected);
-      }
-      const index = wrapNative(native);
-      const first = failure(() => index.ingest(input));
-      checkError(first, "ERR_OKF_INDEX_UNUSABLE", "<index>");
-      expect(failure(() => index.ingest(input))).toBe(first);
-      expect(failure(() => index.remove("\ud800"))).toBe(first);
-      expect(failure(() => index.listTypes())).toBe(first);
-      expect(calls).toEqual([]);
-      expect("createPoisonedSearchFixture" in createRequire(import.meta.url)(join(root, "native.cjs"))).toBe(false);
+      const child = spawnSync(process.execPath, [
+        join(dirname(require.resolve("vitest/package.json")), "vitest.mjs"),
+        "run",
+        "tests/raw-boundary.test.ts",
+        "--testNamePattern",
+        "native poison precedes getters and path validation, then the facade caches it",
+        "--no-file-parallelism",
+      ], { cwd: root, env: childEnvironment, encoding: "utf8" });
+      expect(child.error).toBeUndefined();
+      expect(child.status, `${child.stdout}\n${child.stderr}`).toBe(0);
     } finally { rmSync(temporary, { recursive: true, force: true }); }
   }, 120_000);
 
