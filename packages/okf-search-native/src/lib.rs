@@ -346,18 +346,17 @@ fn analyzer() -> TextAnalyzer {
 
 fn schema() -> (Schema, Fields) {
     let mut builder = Schema::builder();
-    let indexed = TextOptions::default()
-        .set_indexing_options(
-            TextFieldIndexing::default()
-                .set_tokenizer(TOKENIZER)
-                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-        )
-        .set_stored();
+    let indexed = TextOptions::default().set_indexing_options(
+        TextFieldIndexing::default()
+            .set_tokenizer(TOKENIZER)
+            .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+    );
+    let indexed_stored = indexed.clone().set_stored();
 
     let section_id = builder.add_text_field("section_id", STRING | STORED);
     let document_id = builder.add_text_field("document_id", STRING | STORED);
     let conformance = builder.add_text_field("conformance", STRING | STORED);
-    let title = builder.add_text_field("title", indexed.clone());
+    let title = builder.add_text_field("title", indexed_stored.clone());
     let path = builder.add_text_field("path", STORED);
     let type_text = builder.add_text_field("type_text", indexed.clone());
     // Filter-only metadata is indexed but deliberately not stored. Search must
@@ -373,10 +372,10 @@ fn schema() -> (Schema, Fields) {
     let staleness_classified = builder.add_u64_field("staleness_classified", INDEXED);
     let trust_tier = builder.add_text_field("trust_tier", STRING);
     let resource = builder.add_text_field("resource", indexed.clone());
-    let heading = builder.add_text_field("heading", indexed.clone());
+    let heading = builder.add_text_field("heading", indexed_stored.clone());
     let description = builder.add_text_field("description", indexed.clone());
     let sources = builder.add_text_field("sources", indexed.clone());
-    let body = builder.add_text_field("body", indexed);
+    let body = builder.add_text_field("body", indexed_stored);
     let start_line = builder.add_u64_field("start_line", STORED);
     let end_line = builder.add_u64_field("end_line", STORED);
 
@@ -2420,8 +2419,10 @@ mod tests {
     }
 
     #[test]
-    fn filter_only_metadata_is_not_readable_from_the_document_store() {
-        let engine = fixture_engine();
+    fn stored_field_contract_is_exact() {
+        let mut value = document(section("stored-fields", "memory body"));
+        value.source_text = "source value".to_owned();
+        let engine = Engine::new(vec![value]).expect("stored-field fixture");
         let searcher = engine.reader.searcher();
         let query = TermQuery::new(
             Term::from_field_text(engine.fields.body, "memory"),
@@ -2435,13 +2436,121 @@ mod tests {
             .doc::<TantivyDocument>(address)
             .expect("stored document");
 
+        for (field, name) in [
+            (engine.fields.type_text, "type_text"),
+            (engine.fields.tags_text, "tags_text"),
+            (engine.fields.resource, "resource"),
+            (engine.fields.description, "description"),
+            (engine.fields.sources, "sources"),
+        ] {
+            assert!(
+                doc.get_first(field).is_none(),
+                "{name} should not be stored"
+            );
+        }
+        for (field, name) in [
+            (engine.fields.section_id, "section_id"),
+            (engine.fields.document_id, "document_id"),
+            (engine.fields.conformance, "conformance"),
+            (engine.fields.title, "title"),
+            (engine.fields.path, "path"),
+            (engine.fields.heading, "heading"),
+            (engine.fields.body, "body"),
+        ] {
+            assert!(doc.get_first(field).is_some(), "{name} should be stored");
+        }
+        assert!(doc.get_first(engine.fields.start_line).is_some());
+        assert!(doc.get_first(engine.fields.end_line).is_some());
         assert!(doc.get_first(engine.fields.type_exact).is_none());
         assert!(doc.get_first(engine.fields.tag_exact).is_none());
         assert!(doc.get_first(engine.fields.status).is_none());
         assert!(doc.get_first(engine.fields.stale_after_epoch).is_none());
         assert!(doc.get_first(engine.fields.staleness_classified).is_none());
         assert!(doc.get_first(engine.fields.trust_tier).is_none());
-        assert!(doc.get_first(engine.fields.conformance).is_some());
+    }
+
+    #[test]
+    fn omitted_stored_copies_remain_searchable_boostable_filterable_and_returnable() {
+        let mut resource = document(section("resource-result", "resource result body"));
+        resource.resource = "resourceterm".to_owned();
+        let mut document_type = document(section("type-result", "type result body"));
+        document_type.document_type = "Typeterm".to_owned();
+        let mut tags = document(section("tags-result", "tags result body"));
+        tags.tags = vec!["Tagterm".to_owned()];
+        let mut description = document(section("description-result", "description result body"));
+        description.description = "descriptionterm".to_owned();
+        let mut sources = document(section("sources-result", "sources result body"));
+        sources.source_text = "sourceterm".to_owned();
+
+        let engine = Engine::new(vec![resource, document_type, tags, description, sources])
+            .expect("searchable-field fixture");
+        for (term, field) in [
+            ("resourceterm", "resource"),
+            ("typeterm", "type"),
+            ("tagterm", "tags"),
+            ("descriptionterm", "description"),
+            ("sourceterm", "sources"),
+        ] {
+            let hits = engine
+                .search(term, Some(search_options(&[field], "any")))
+                .expect("searchable field search");
+            assert_eq!(hits.len(), 1, "{field} search should return one hit");
+            assert_eq!(hits[0].matched_fields, vec![field.to_owned()]);
+        }
+
+        let result = engine
+            .search("resourceterm", Some(search_options(&["resource"], "any")))
+            .expect("result search");
+        assert_eq!(result[0].path, "resource-result.md");
+        assert_eq!(result[0].title, "Memory architecture for resource-result");
+        assert_eq!(result[0].heading_path, "Overview");
+        assert_eq!(result[0].snippet, "resource result body");
+        assert_eq!(result[0].start_line, 1);
+        assert_eq!(result[0].end_line, 3);
+
+        let mut filtered = document(section("filtered-result", "filterterm"));
+        filtered.document_type = "FilteredType".to_owned();
+        filtered.tags = vec!["FilteredTag".to_owned()];
+        let filtered_engine = Engine::new(vec![filtered]).expect("filter fixture");
+        let mut filter = where_filter();
+        filter.types = Some(vec!["FilteredType".to_owned()]);
+        filter.tags_any = Some(vec!["FilteredTag".to_owned()]);
+        let mut filtered_options = search_options(&["body"], "any");
+        filtered_options.where_filter = Some(filter);
+        assert_eq!(
+            filtered_engine
+                .search("filterterm", Some(filtered_options))
+                .expect("exact metadata filters")
+                .len(),
+            1
+        );
+
+        let mut resource_rank = document(section("resource-rank", "ordinary body"));
+        resource_rank.resource = "boostterm".to_owned();
+        let body_rank = document(section("body-rank", "boostterm"));
+        let ranking = Engine::new(vec![resource_rank, body_rank]).expect("boost fixture");
+        let defaults = ranking
+            .search(
+                "boostterm",
+                Some(search_options(&["resource", "body"], "any")),
+            )
+            .expect("default boosts");
+        assert_eq!(defaults[0].document_id, "resource-rank");
+        let mut boosted = search_options(&["resource", "body"], "any");
+        boosted.boost = Some(SearchBoost {
+            resource: Some(0.1),
+            title: None,
+            heading: None,
+            description: None,
+            tags: None,
+            document_type: None,
+            sources: None,
+            body: Some(10.0),
+        });
+        let boosted = ranking
+            .search("boostterm", Some(boosted))
+            .expect("custom boosts");
+        assert_eq!(boosted[0].document_id, "body-rank");
     }
 
     fn strict_section(document_id: &str, text: &str) -> PreparedSection {

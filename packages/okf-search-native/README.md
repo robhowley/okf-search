@@ -226,31 +226,56 @@ console.log(index.listDegradedDocuments());
 ## Performance benchmarks
 
 On a sample OKF bundle of 13,692 Markdown documents (59.57 MiB
-of source text), native opened about **9.9× faster** and used **79% less
+of source text), native opened about **10.8× faster** and used **70% less
 post-open resident memory** in this benchmark.
 
-| Metric | [okf-minisearch 2.3.0][benchmark-minisearch] | [okf-search-native 0.5.1][benchmark-native] |
-| --- | ---: | ---: |
-| Median `openOkf` time | 21.85 s | 2.21 s |
-| Warm query p50 | 11.05 ms | 1.33 ms |
-| Warm query p95 | 87.02 ms | 2.32 ms |
-| Median post-open RSS | 2,417 MiB | 502 MiB |
-| Median peak RSS | 3,138 MiB | 590 MiB |
+| Metric | [okf-minisearch][benchmark-minisearch] | [okf-search-native][benchmark-native] | % Reduction |
+| --- | ---: | ---: | ---: |
+| Median `openOkf` time | 21.65 s | 2.00 s | 90.8% |
+| Warm query p50 | 10.93 ms | 1.40 ms | 87.2% |
+| Warm query p95 | 86.93 ms | 2.44 ms | 97.2% |
+| Reported index storage¹ | 200.37 MiB | 81.31 MiB | — |
+| Median post-open RSS | 1,880 MiB | 558 MiB | 70.3% |
 
-[benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-minisearch/package.json
-[benchmark-native]: https://github.com/robhowley/okf-search/blob/db885cb850e986e99bd9f5117e390d89ea9cf90c/packages/okf-search-native/package.json
+¹ MiniSearch: serialized JSON bytes. Native: in-memory Tantivy index-file bytes.
+These measure different representations, not equivalent RAM usage; RSS measures
+total process memory.
 
-Measured on macOS arm64, Node.js 24.15.0, using local builds of the linked
-source revisions (native in release mode).
+[benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/830b9bfb3882cb965b57119d03d2ebcd1f38885a/packages/okf-minisearch/package.json
+[benchmark-native]: https://github.com/robhowley/okf-search/blob/830b9bfb3882cb965b57119d03d2ebcd1f38885a/packages/okf-search-native/package.json
 
-- **Method:** five fresh processes per backend, run sequentially; nine default-option
-  queries, each with 30 warmups and 200 timed calls per process. Query percentiles
-  pool all samples. Open time excludes imports; filesystem caches were not cleared.
+The native column is a committed branch candidate, not a published release. Its
+manifest version is 0.5.1 (MiniSearch: 2.3.0); the benchmarked candidate applies
+this branch's stored-field and compatibility changes relative to base revision
+`830b9bfb3882cb965b57119d03d2ebcd1f38885a`. MiniSearch was built from the base
+revision; native was built from this candidate in release mode.
+
+### Detailed results
+
+Peak RSS medians were 2,930.55 MiB for MiniSearch and 638.87 MiB for native.
+MiniSearch's API-reported serialized-index size was 210,099,191 bytes (200.37
+MiB). Native's API-reported RamDirectory file-map size was 85,259,866 bytes
+(81.31 MiB). These storage measurements are backend-specific: native bytes are
+not total RSS or persisted disk size, and normal background merges can change
+the RamDirectory value after open.
+
+- **Method:** ten balanced AB/BA pairs (20 fresh processes total), run sequentially;
+  five MiniSearch→native pairs and five native→MiniSearch pairs. Each process ran
+  the same nine default-option queries, with 30 warmups and 200 timed calls per
+  query. Open time excludes imports and query calls used the package-root public
+  `openOkf`/`search` APIs, not raw binding methods. Filesystem caches were warm and
+  uncontrolled.
+- **Aggregation:** open time, RSS, peak RSS, and storage are medians across ten
+  fresh processes per backend, with ranges retained in the benchmark report.
+  Query p50/p95 are pooled across 18,000 timed calls per backend, not medians of
+  process-level percentiles.
 - **Memory:** RSS covers the whole process, including native allocations. Post-open
-  samples follow `indexStats()` and forced GC; peak includes startup, stats, and
-  searches. MiniSearch's stats serialization can increase memory usage.
-- **Limits:** one private corpus, not distributed here. MiniSearch was faster on
-  two queries; equivalent hits and ranking were not tested.
+  samples follow the public `indexStats()` call and forced GC; peak includes startup,
+  opening, stats, and searches. MiniSearch's stats serialization can affect memory
+  and allocator retention.
+- **Limits:** one private corpus, not distributed here; no cold filesystem-cache
+  condition was established. Hit counts and public hit shapes were stable, but
+  result identity, ranking, and scores were not compared between backends.
 
 ## Reference and development
 

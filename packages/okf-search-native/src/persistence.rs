@@ -16,7 +16,7 @@ const MAX_MANIFEST: usize = 64 * 1024 * 1024;
 const MAX_ENCODED_MANIFEST: usize = 65 * 1024 * 1024;
 // Bump the corresponding revision whenever schema, analysis, or preparation
 // semantics change. The exact Tantivy dependency is pinned in Cargo.toml.
-const COMPATIBILITY: &str = "schema=1;analyzer=1;preparation=1;tantivy=0.26.1";
+const COMPATIBILITY: &str = "schema=2;analyzer=1;preparation=1;tantivy=0.26.1";
 type Result<T> = std::result::Result<T, PreparationError>;
 
 fn error(code: &'static str, path: &str, cause: impl std::fmt::Display) -> PreparationError {
@@ -1119,6 +1119,11 @@ mod tests {
         assert_eq!(load_error(&path), "ERR_OKF_CACHE_INCOMPATIBLE");
         let changed = rewrite_manifest(&original, |m| m["compatibility"] = "new".into());
         fs::write(&path, changed).unwrap();
+        assert_eq!(load_error(&path), "ERR_OKF_CACHE_INCOMPATIBLE");
+        let previous_schema = rewrite_manifest(&original, |m| {
+            m["compatibility"] = "schema=1;analyzer=1;preparation=1;tantivy=0.26.1".into();
+        });
+        fs::write(&path, previous_schema).unwrap();
         assert_eq!(load_error(&path), "ERR_OKF_CACHE_INCOMPATIBLE");
         for (field, value) in [
             ("document_type", serde_json::json!("other")),
