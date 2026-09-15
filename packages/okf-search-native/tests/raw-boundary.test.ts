@@ -1,8 +1,10 @@
-import { spawnSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { createInterface } from "node:readline";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { NativeOkfSearch } from "../native.cjs";
 import { wrapNative } from "../src/create-okf-search.js";
@@ -24,7 +26,31 @@ function checkError(error: any, code: string, path: string, field?: string) {
   expect(Object.hasOwn(error, "cause")).toBe(false);
 }
 
-function runPoisonFixture(root: string, addon: string): void {
+async function expectPoisonedSave(native: NativeOkfSearch, path: string): Promise<void> {
+  let error: unknown;
+  try {
+    await native.save(path);
+  } catch (caught) {
+    error = caught;
+  }
+  expect(error).toBeDefined();
+  expect((error as Error).message).toMatch(/^\[ERR_OKF_INDEX_UNUSABLE\]/);
+}
+
+function rustTestExecutable(root: string): string {
+  const build = spawnSync("cargo", [
+    "test", "--locked", "--no-run", "--message-format=json",
+  ], { cwd: root, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+  expect(build.error).toBeUndefined();
+  expect(build.status, `${build.stdout}\n${build.stderr}`).toBe(0);
+  const artifact = build.stdout.trim().split("\n").map(line => JSON.parse(line))
+    .find(message => message.reason === "compiler-artifact" &&
+      message.profile.test && message.executable);
+  if (!artifact?.executable) throw new Error("Rust test executable must be available");
+  return artifact.executable;
+}
+
+async function runPoisonFixture(root: string, addon: string): Promise<void> {
   const { createPoisonedSearchFixture } = require(addon);
   const native: NativeOkfSearch = createPoisonedSearchFixture();
   // A genuine native error from a different handle is still a caller throw.
@@ -70,6 +96,52 @@ function runPoisonFixture(root: string, addon: string): void {
   expect(failure(() => index.remove("\ud800"))).toBe(first);
   expect(failure(() => index.listTypes())).toBe(first);
   expect(calls).toEqual([]);
+
+  const temporary = mkdtempSync(join(tmpdir(), "okf-poison-save-"));
+  try {
+    await expectPoisonedSave(native, "");
+    const missingDestination = join(temporary, "missing", "nested", "cache.okf");
+    expect(readdirSync(temporary)).toEqual([]);
+    await expectPoisonedSave(native, missingDestination);
+    expect(readdirSync(temporary)).toEqual([]);
+
+    const lockedDestination = join(temporary, "locked", "cache.okf");
+    const holder = spawn(rustTestExecutable(root), [
+      "--exact", "persistence::tests::persistence_process_writer_helper", "--nocapture",
+    ], {
+      cwd: root,
+      env: { ...process.env, OKF_TEST_CHILD_CACHE: lockedDestination },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    const holderExit = once(holder, "exit");
+    const lines = createInterface({ input: holder.stdout! });
+    try {
+      const barrier = (async () => {
+        for await (const line of lines) {
+          if (line.includes("OKF_CHILD_BEFORE_PUBLISH")) return;
+        }
+        throw new Error("writer exited before barrier");
+      })();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          barrier,
+          new Promise<void>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("writer barrier timed out")), 15_000);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        lines.close();
+      }
+      await expectPoisonedSave(native, lockedDestination);
+    } finally {
+      if (holder.exitCode === null) holder.kill();
+      await holderExit;
+    }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
   expect("createPoisonedSearchFixture" in require(join(root, "native.cjs"))).toBe(false);
 }
 
@@ -182,11 +254,11 @@ describe("native raw preparation boundary", () => {
     ])), "ERR_OKF_PARSE", "a.md");
   });
 
-  it("native poison precedes getters and path validation, then the facade caches it", () => {
+  it("native poison precedes getters and path validation, then the facade caches it", async () => {
     const root = join(__dirname, "..");
     const fixtureAddon = process.env.OKF_POISON_FIXTURE_ADDON;
     if (fixtureAddon) {
-      runPoisonFixture(root, fixtureAddon);
+      await runPoisonFixture(root, fixtureAddon);
       return;
     }
 

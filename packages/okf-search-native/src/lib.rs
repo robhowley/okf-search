@@ -1792,11 +1792,11 @@ impl NativeOkfSearch {
         env: Env,
         path: Utf16String,
     ) -> Result<napi::bindgen_prelude::AsyncTask<persistence::SaveTask>, Error> {
+        let engine = self.inner.lock();
+        engine.usable().map_err(native_error)?;
         let path = persistence::path(&path, "path").map_err(|e| preparation_error(&env, e))?;
         let guard =
             persistence::WriterGuard::acquire(&path).map_err(|e| preparation_error(&env, e))?;
-        let engine = self.inner.lock();
-        engine.usable().map_err(native_error)?;
         let snapshot = persistence::Snapshot::capture(&engine);
         Ok(napi::bindgen_prelude::AsyncTask::new(
             persistence::SaveTask::new(snapshot, guard),
