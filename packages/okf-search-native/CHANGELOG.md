@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.5.1...okf-search-native-v0.6.0) (2026-09-15)
+
+
+### Features
+
+* **okf-search-native:** add explicit cache persistence ([#91](https://github.com/robhowley/okf-search/issues/91)) ([830b9bf](https://github.com/robhowley/okf-search/commit/830b9bfb3882cb965b57119d03d2ebcd1f38885a))
+
+
+### Performance Improvements
+
+* **okf-search-native:** remove unused stored fields ([#92](https://github.com/robhowley/okf-search/issues/92)) ([2abb24e](https://github.com/robhowley/okf-search/commit/2abb24eb7b26115a2967597ca91606d7b59cfd08))
+
 ## [0.5.1](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.5.0...okf-search-native-v0.5.1) (2026-09-14)
 
 
