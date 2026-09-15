@@ -350,8 +350,7 @@ impl Snapshot {
         #[cfg(test)]
         checkpoint(2).map_err(write)?;
         reject_alias(&guard.destination).map_err(write)?;
-        temp.persist(&guard.destination)
-            .map_err(|e| write(e.error))?;
+        fs::rename(temp.path(), &guard.destination).map_err(write)?;
         Ok(())
     }
 }
