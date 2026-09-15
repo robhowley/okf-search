@@ -65,6 +65,7 @@ const nativeRootTypeExports = [
   "OkfIndexStorageStats",
   "OkfIngestResult",
   "OkfLogicalIndexStats",
+  "OkfOpenOptions",
   "OkfParameter",
   "OkfSearch",
   "OkfSearchField",
