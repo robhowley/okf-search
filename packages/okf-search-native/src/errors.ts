@@ -44,6 +44,14 @@ function message(
       return `Cannot parse OKF concept: ${subject}`;
     case "ERR_OKF_FIELD":
       return `Invalid OKF field: ${subject}`;
+    case "ERR_OKF_CACHE_INVALID":
+      return `Invalid OKF cache: ${subject}`;
+    case "ERR_OKF_CACHE_INCOMPATIBLE":
+      return `Incompatible OKF cache: ${subject}`;
+    case "ERR_OKF_WRITE":
+      return `Cannot write OKF cache: ${subject}`;
+    case "ERR_OKF_CACHE_BUSY":
+      return `OKF cache is busy: ${subject}`;
     case "ERR_OKF_INDEX_UNUSABLE":
       return path === "<index>"
         ? "Search index is permanently unusable and must be rebuilt"
@@ -63,11 +71,16 @@ export function throwNativeError(error: unknown, path: string): never {
   if (!NATIVE_MARKER.test(message)) throw error;
 
   if (typeof error === "object" && error !== null && "code" in error && "path" in error) {
-    const detail = error as { code: string; path: string; field?: string; cause?: unknown };
-    if (detail.code === "ERR_OKF_FIELD" || detail.code === "ERR_OKF_PARSE" || detail.code === "ERR_OKF_READ") {
+    const detail = error as {
+      code: string;
+      path: string;
+      field?: string;
+      cause?: string;
+    };
+    if (isNativeStructuredCode(detail.code) && typeof detail.path === "string") {
       throw new OkfError(detail.code, detail.path, {
         ...(detail.field === undefined ? {} : { field: detail.field }),
-        ...(detail.cause === undefined ? {} : { cause: new Error(String(detail.cause)) }),
+        ...(detail.cause === undefined ? {} : { cause: new Error(detail.cause) }),
       });
     }
   }
@@ -79,6 +92,19 @@ export function throwNativeError(error: unknown, path: string): never {
   throw INVALID_SEARCH_OPTIONS_MARKER.test(message)
     ? new TypeError(sanitized)
     : new Error(sanitized || "Native OKF search failed");
+}
+
+function isNativeStructuredCode(
+  code: string,
+): code is Exclude<OkfErrorCode, "ERR_OKF_UNSUPPORTED"> {
+  return code === "ERR_OKF_READ" ||
+    code === "ERR_OKF_PARSE" ||
+    code === "ERR_OKF_FIELD" ||
+    code === "ERR_OKF_CACHE_INVALID" ||
+    code === "ERR_OKF_CACHE_INCOMPATIBLE" ||
+    code === "ERR_OKF_WRITE" ||
+    code === "ERR_OKF_CACHE_BUSY" ||
+    code === "ERR_OKF_INDEX_UNUSABLE";
 }
 
 export function nativeMessage(error: unknown): string {

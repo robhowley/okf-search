@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
 mod filesystem;
+mod persistence;
 mod preparation;
 mod raw_api;
 use napi::{Env, bindgen_prelude::Utf16String};
@@ -41,7 +42,7 @@ const FETCH_FLOOR: usize = 32;
 const MAX_SAFE_INTEGER: u128 = 9_007_199_254_740_991;
 
 #[napi(object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Diagnostic {
     pub code: String,
     pub message: String,
@@ -874,7 +875,7 @@ enum EngineError {
     Tantivy(#[from] tantivy::TantivyError),
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct DocumentState {
     document_id: String,
     path: String,
@@ -1778,8 +1779,28 @@ impl NativeOkfSearch {
     }
 
     #[napi(js_name = "openRaw", ts_return_type = "Promise<NativeOkfSearch>")]
-    pub fn open_raw(root: Utf16String) -> napi::bindgen_prelude::AsyncTask<raw_api::OpenTask> {
-        raw_api::open_raw(root)
+    pub fn open_raw(
+        root: Utf16String,
+        cache_path: Option<Utf16String>,
+    ) -> napi::bindgen_prelude::AsyncTask<raw_api::OpenTask> {
+        raw_api::open_raw(root, cache_path)
+    }
+
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn save(
+        &self,
+        env: Env,
+        path: Utf16String,
+    ) -> Result<napi::bindgen_prelude::AsyncTask<persistence::SaveTask>, Error> {
+        let engine = self.inner.lock();
+        engine.usable().map_err(native_error)?;
+        let path = persistence::path(&path, "path").map_err(|e| preparation_error(&env, e))?;
+        let guard =
+            persistence::WriterGuard::acquire(&path).map_err(|e| preparation_error(&env, e))?;
+        let snapshot = persistence::Snapshot::capture(&engine);
+        Ok(napi::bindgen_prelude::AsyncTask::new(
+            persistence::SaveTask::new(snapshot, guard),
+        ))
     }
 
     #[napi(factory, js_name = "fromRaw")]

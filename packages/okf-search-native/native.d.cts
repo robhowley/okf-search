@@ -17,7 +17,8 @@ export declare class NativeOkfSearch {
    */
   autoSuggest(query: string, options?: SearchOptions | undefined | null): Array<Suggestion>
   static validateRaw(input: object): unknown
-  static openRaw(root: string): Promise<NativeOkfSearch>
+  static openRaw(root: string, cachePath?: string | undefined | null): Promise<NativeOkfSearch>
+  save(path: string): Promise<void>
   static fromRaw(inputs: Array<object>): NativeOkfSearch
   assertUsable(): void
   ingestRaw(input: object): unknown

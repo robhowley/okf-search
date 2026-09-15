@@ -139,11 +139,90 @@ lookup, and later parse diagnostics. Metadata and body-link values are inert;
 for example, `resource: ../target` is accepted as data.
 
 
-The index never writes source files, watches the directory, or persists an
-index to disk. `remove` changes only the current index. To see filesystem
-changes, call `openOkf` again; it rebuilds a new handle from the files on disk.
-A preparation failure in `ingest` leaves an existing document unchanged, so a
-corrected replacement can be retried on the same usable handle.
+The index never writes source files or watches the directory. `remove` changes
+only the current handle. Without a cache path, `openOkf` keeps the index in
+memory and creates no cache artifacts; call it again to pick up source
+filesystem changes. A preparation failure in `ingest` leaves an existing
+document unchanged, so a corrected replacement can be retried on the same
+usable handle.
+
+## Persistence
+
+Persistence is opt-in. Use `cachePath` when opening a directory and
+`save(path)` when publishing a handle snapshot. These are filesystem paths;
+document `path` values remain logical identities.
+
+### Open with a cache
+
+```js
+import { openOkf } from "okf-search-native";
+
+const cachePath = "./.cache/knowledge.okf";
+const index = await openOkf("./knowledge", { cachePath });
+```
+
+`openOkf(root, options?)` accepts:
+
+```ts
+interface OkfOpenOptions {
+  readonly cachePath?: string;
+}
+```
+
+- **Cache hit:** an existing cache is loaded directly. The source `root` is not
+  accessed, does not need to exist, and is not used to rebase saved identities.
+- **Cache miss:** only a genuinely missing destination counts as a miss. Parent
+  directories are created, the collection is built from `root`, and the
+  complete cache is published before `openOkf` resolves.
+- **Reject:** existing directories, dangling links, corrupt or incompatible
+  files, and other read failures reject instead of triggering a hidden rebuild.
+- **Compatibility:** cache metadata records the supported format, schema,
+  analyzer, preparation, and Tantivy compatibility revisions. Unsupported
+  metadata reports `ERR_OKF_CACHE_INCOMPATIBLE`; damaged contents report
+  `ERR_OKF_CACHE_INVALID`.
+
+A missing-cache open takes the same sibling writer lock as `save`. If another
+writer holds that destination claim, it rejects with `ERR_OKF_CACHE_BUSY` rather
+than waiting.
+
+### Save a handle snapshot
+
+`OkfSearch.save(path): Promise<void>` is available on package-root handles from
+both `openOkf` and `createOkfSearch`. The prepared `NativeOkfSearch` handle
+exported from `okf-search-native/prepared` exposes the same method.
+
+```js
+import { createOkfSearch } from "okf-search-native";
+
+const index = createOkfSearch([
+  { path: "notes/one.md", markdown: "---\ntype: note\n---\nOne.\n" },
+]);
+
+index.ingest({
+  path: "notes/new.md",
+  markdown: "---\ntype: note\n---\nNew material.\n",
+});
+await index.save("./.cache/notes.okf");
+```
+
+- `save` takes a snapshot when called. Later changes need another save.
+- `await save(path)` waits until the cache file has been replaced.
+- Only one save can write a path at a time; others fail with
+  `ERR_OKF_CACHE_BUSY`. Separate indexes are not merged.
+- If saving fails, the old cache and a healthy index remain usable.
+
+### Cache files and safety
+
+The cache is one file. On a local filesystem, readers see the complete old or
+new file—never a partly written one. This does not guarantee recovery after
+power loss or safe writes on network filesystems.
+
+Saving also creates files beside the cache:
+
+- `.<basename>.okf-lock` prevents simultaneous writes. Leave it in place;
+  loading or copying the cache does not require it.
+- Temporary files are normally removed. If the process is killed, they may
+  need manual cleanup.
 
 ## Validation and failures
 
@@ -171,9 +250,9 @@ if (validation.isIndexable) {
 }
 ```
 
-The exported [`OkfValidationResult`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/src/types.ts#L97-L112)
+The exported [`OkfValidationResult`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/src/types.ts#L105-L120)
 discriminates these outcomes; each error uses the exported
-[`OkfDiagnostic`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/src/types.ts#L90-L95) type.
+[`OkfDiagnostic`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/src/types.ts#L98-L103) type.
 
 - Strict input returns `isValid: true`, `isIndexable: true`, and no errors.
 - Degraded input returns `isValid: false`, `isIndexable: true`, and diagnostics;
@@ -211,14 +290,28 @@ try {
 }
 ```
 
-`OkfError` codes are `ERR_OKF_READ`, `ERR_OKF_PARSE`, `ERR_OKF_FIELD`,
-`ERR_OKF_INDEX_UNUSABLE`, and `ERR_OKF_UNSUPPORTED`. Filesystem failures from
-`openOkf` use `ERR_OKF_READ` and include the failing `path` and, when available,
-a `cause`. Invalid search options are `TypeError`, not `OkfError`; for example,
-`search("x", { limit: -1 })` reports that `options.limit` must be a finite
-non-negative integer. If a native mutation failure makes a handle unusable,
-subsequent calls report `ERR_OKF_INDEX_UNUSABLE`; rebuild the handle from the
-source documents.
+### Error codes
+
+| Code | Meaning |
+| --- | --- |
+| `ERR_OKF_READ` | A source or cache path could not be read, or an existing cache destination is not a regular file. |
+| `ERR_OKF_PARSE` | Markdown or document preparation failed. |
+| `ERR_OKF_FIELD` | An input field or cache path is invalid. |
+| `ERR_OKF_CACHE_INVALID` | Cache contents are damaged or fail cache-internal validation. |
+| `ERR_OKF_CACHE_INCOMPATIBLE` | The cache format or compatibility revisions are unsupported. |
+| `ERR_OKF_WRITE` | Cache publication or another cache filesystem write failed. |
+| `ERR_OKF_CACHE_BUSY` | Another writer holds the destination lock. |
+| `ERR_OKF_INDEX_UNUSABLE` | A native mutation failed; rebuild the handle. |
+| `ERR_OKF_UNSUPPORTED` | The requested operation is not supported by this backend. |
+
+Filesystem failures report the relevant path and, when available, a `cause`.
+Cache I/O, format, and lock failures report the supplied cache destination in
+`path`. Invalid cache paths use `ERR_OKF_FIELD` with `field: "cachePath"` for
+`openOkf` and `field: "path"` for `save`. Invalid search options are
+`TypeError`, not `OkfError`; for example, `search("x", { limit: -1 })` reports
+that `options.limit` must be a finite non-negative integer. If a native
+mutation failure makes a handle unusable, subsequent calls report
+`ERR_OKF_INDEX_UNUSABLE`; rebuild the handle from the source documents.
 
 ## Inspect the collection
 

@@ -77,6 +77,22 @@ for (const [label, spec] of Object.entries(workflows)) {
   });
 }
 
+test("source CI runs the full native package suite on every target before upload", async () => {
+  const workflow = await parseWorkflow(workflows.source.path);
+  const steps = workflow.jobs[workflows.source.job].steps;
+  const index = steps.findIndex(({ name }) => name === "Full native package tests");
+  assert.ok(index >= 0);
+  assert.equal(steps[index].run, "pnpm --dir packages/okf-search-native run test");
+  assert.deepEqual(steps[index].env, {
+    CARGO_BUILD_TARGET: "${{ matrix.target }}",
+  });
+  assert.equal(steps[index]["working-directory"], undefined);
+  assert.equal(steps[index].if, undefined);
+  assert.equal(steps.find(({ name }) => name === "Rust persistence tests"), undefined);
+  assert.equal(steps.find(({ name }) => name === "Runtime package API test"), undefined);
+  assert.ok(index < steps.findIndex(({ name }) => name === "Upload tested artifact"));
+});
+
 test("the build owner applies common flags, target options, and facade sequencing", async () => {
   const events = [];
   await buildNativePackage(
@@ -141,6 +157,7 @@ test("native package exposes one complete build boundary and portable facade tes
   for (const filename of [
     "directory.test.ts",
     "lifecycle.test.ts",
+    "persistence.test.ts",
     "raw-boundary.test.ts",
     "root-contract.test.ts",
     "search-options.test.ts",
@@ -149,7 +166,7 @@ test("native package exposes one complete build boundary and portable facade tes
   }
 });
 
-test("native workflows preserve build, package API, GLIBC, and upload gates", async () => {
+test("native workflows preserve build, runtime, GLIBC, and upload gates", async () => {
   for (const { path, job } of Object.values(workflows)) {
     const parsed = await parseWorkflow(path);
     const steps = parsed.jobs[job].steps;
@@ -168,9 +185,10 @@ test("native workflows preserve build, package API, GLIBC, and upload gates", as
       glibc.run,
       'pnpm --dir packages/okf-search-native run verify:release-artifacts glibc "${{ matrix.artifact }}"',
     );
-    const runtime = steps.findIndex(({ run }) =>
-      run === "pnpm --dir packages/okf-search-native run test:package-api"
-    );
+    const runtimeCommand = path === workflows.source.path
+      ? "pnpm --dir packages/okf-search-native run test"
+      : "pnpm --dir packages/okf-search-native run test:package-api";
+    const runtime = steps.findIndex(({ run }) => run === runtimeCommand);
     assert.ok(runtime >= 0);
     assert.ok(runtime < steps.findIndex(({ name }) => name === "Upload tested artifact"));
   }
