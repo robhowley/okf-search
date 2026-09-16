@@ -124,8 +124,6 @@ pub struct SearchBoost {
 #[derive(Clone, Debug)]
 pub struct SearchOptions {
     pub limit: Option<f64>,
-    /// Maximum section-text window in UTF-16 code units, like JavaScript's
-    /// `String.length`; ellipsis markers are outside this budget.
     #[napi(js_name = "snippetLength")]
     pub snippet_length: Option<f64>,
     #[napi(js_name = "where")]
