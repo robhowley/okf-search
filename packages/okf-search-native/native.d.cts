@@ -134,6 +134,7 @@ export interface SearchHit {
 
 export interface SearchOptions {
   limit?: number
+  snippetLength?: number
   where?: SearchWhere
   asOf?: Date
   match?: string

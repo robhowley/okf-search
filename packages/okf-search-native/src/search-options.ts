@@ -30,6 +30,7 @@ type FilterName = typeof FILTER_NAMES[number];
 
 type SearchOptionsInput = {
   readonly limit?: unknown;
+  readonly snippetLength?: unknown;
   readonly where?: unknown;
   readonly asOf?: unknown;
   readonly match?: unknown;
@@ -54,6 +55,9 @@ export function sanitizeSearchOptions(
   const limitValue = options.limit;
   const limit = validateLimit(limitValue);
 
+  const snippetLengthValue = options.snippetLength;
+  const snippetLength = validateSnippetLength(snippetLengthValue);
+
   const matchValue = options.match;
   const match = validateMatch(matchValue);
 
@@ -73,6 +77,10 @@ export function sanitizeSearchOptions(
 
   if (limitValue !== undefined) {
     native.limit = limit;
+  }
+
+  if (snippetLength !== undefined) {
+    native.snippetLength = snippetLength;
   }
 
   if (where !== undefined) {
@@ -139,6 +147,20 @@ function validateLimit(value: unknown): number {
   }
 
   return limit;
+}
+
+function validateSnippetLength(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(
+      "options.snippetLength must be a finite positive integer",
+    );
+  }
+
+  return value;
 }
 
 function validateMatch(

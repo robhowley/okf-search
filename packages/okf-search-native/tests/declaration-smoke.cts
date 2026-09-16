@@ -71,6 +71,8 @@ type ExactIndexStorageSize = Assert<Same<
 
 const error = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 const rootHandle: OkfSearch = createOkfSearch([]);
+const options: OkfSearchOptions = { snippetLength: 240 };
+rootHandle.search("memory", options);
 const opened: Promise<OkfSearch> = openOkf(".", { cachePath: ".cache/okf" });
 const saved: Promise<void> = rootHandle.save(".cache/okf");
 const validation: OkfValidationResult = validateOkfDocument({
