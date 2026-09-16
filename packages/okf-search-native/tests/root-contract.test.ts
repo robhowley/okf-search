@@ -251,7 +251,7 @@ describe("friendly search behavior", () => {
       .toHaveLength(1);
   });
 
-  it("configures UTF-8 snippet windows without changing result ordering", () => {
+  it("configures UTF-16 snippet windows without changing result ordering", () => {
     const longBody = `prefix snippetneedle ${"x".repeat(252)} larger-only`;
     const index = createOkfSearch([
       {
@@ -278,23 +278,98 @@ describe("friendly search behavior", () => {
       .toBe(`prefix snippetneedle ${"x".repeat(11)}…`);
     expect(longer.find((hit) => hit.documentId === "long")?.snippet)
       .toContain("larger-only");
-    expect(Buffer.byteLength(
-      shorter.find((hit) => hit.documentId === "long")!.snippet.replace("…", ""),
-    )).toBeLessThanOrEqual(32);
+    const shorterText = shorter.find((hit) => hit.documentId === "long")!.snippet
+      .replace("…", "");
+    expect(shorterText.length).toBeLessThanOrEqual(32);
+    expect(Buffer.byteLength(shorterText)).toBeLessThanOrEqual(32);
     expect(order({ snippetLength: 32 })).toEqual(order());
     expect(order({ snippetLength: 300 })).toEqual(order());
   });
 
-  it("measures the snippet window in UTF-8 bytes at character boundaries", () => {
+  it("measures snippet windows in UTF-16 units at scalar boundaries", () => {
     const index = createOkfSearch([{
       path: "unicode.md",
       markdown: concept("type: note", `ééééé needle尾${"z".repeat(20)}`),
     }]);
     const hit = index.search("needle", { snippetLength: 18 })[0]!;
+    const text = hit.snippet.replace("…", "");
 
-    expect(hit.snippet).toBe("ééééé needle…");
-    expect(Buffer.byteLength(hit.snippet.replace("…", ""))).toBe(17);
+    expect(hit.snippet).toBe(`ééééé needle尾${"z".repeat(5)}…`);
+    expect(text.length).toBe(18);
+    expect(Buffer.byteLength(text)).toBeGreaterThan(18);
     expect(hit.snippet).not.toContain("\uFFFD");
+  });
+
+  it("counts CJK, emoji, and combining marks as UTF-16 units", () => {
+    const index = createOkfSearch([
+      {
+        path: "cjk.md",
+        markdown: concept("type: note", `needle${"中".repeat(300)}`),
+      },
+      {
+        path: "emoji.md",
+        markdown: concept("type: note", "needle a😀z"),
+      },
+      {
+        path: "combining.md",
+        markdown: concept("type: note", "needle e\u0301x"),
+      },
+    ]);
+
+    const cjk = index.search("needle", {
+      fields: ["body"],
+      snippetLength: 240,
+    }).find((hit) => hit.documentId === "cjk")!.snippet;
+    expect(cjk.replace("…", "")).toBe(`needle${"中".repeat(234)}`);
+    expect(cjk.replace("…", "").length).toBe(240);
+
+    const emoji = index.search("needle", {
+      fields: ["body"],
+      snippetLength: 7,
+    }).find((hit) => hit.documentId === "emoji")!.snippet;
+    expect(emoji).toBe("needle…");
+    expect(emoji.replace("…", "").length).toBe(6);
+
+    const combining = index.search("needle", {
+      fields: ["body"],
+      snippetLength: 9,
+    }).find((hit) => hit.documentId === "combining")!.snippet;
+    expect(combining).toBe("needle é…");
+    expect(combining.replace("…", "").length).toBe(9);
+  });
+
+  it("uses odd UTF-16 budgets without splitting emoji", () => {
+    const index = createOkfSearch([{
+      path: "emoji-budget.md",
+      markdown: concept("type: note", "a😀z"),
+    }]);
+
+    expect(index.search("a", {
+      fields: ["body"],
+      snippetLength: 1,
+    })[0]!.snippet).toBe("a…");
+    expect(index.search("a", {
+      fields: ["body"],
+      snippetLength: 3,
+    })[0]!.snippet).toBe("a😀…");
+  });
+
+  it("keeps exact matches after non-ASCII lookbehind and leaves ellipses extra", () => {
+    const body = `${"中".repeat(100)} needle ${"x".repeat(200)}`;
+    const index = createOkfSearch([{
+      path: "lookbehind.md",
+      markdown: concept("type: note", body),
+    }]);
+    const hit = index.search("needle", {
+      fields: ["body"],
+      snippetLength: 240,
+    })[0]!;
+
+    expect(hit.snippet).toContain("needle");
+    expect(hit.snippet.startsWith("…")).toBe(true);
+    expect(hit.snippet.endsWith("…")).toBe(true);
+    expect(hit.snippet.length).toBe(242);
+    expect(hit.snippet.replaceAll("…", "").length).toBe(240);
   });
 
   it("supports boosts without asserting cross-engine score parity", () => {

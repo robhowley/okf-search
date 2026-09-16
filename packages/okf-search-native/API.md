@@ -11,7 +11,7 @@ return `[]`. Matching is case-insensitive for searchable text fields.
 | Option | Default | Behavior |
 | --- | --- | --- |
 | `limit` | `10` | Maximum number of returned documents. Must be a finite, non-negative integer; `0` returns `[]`. |
-| `snippetLength` | `240` | Maximum UTF-8 byte length of the section text window. Must be a finite positive integer; ellipsis overhead is excluded. |
+| `snippetLength` | `240` | Maximum section-text window in UTF-16 code units (like JavaScript `String.length`). Must be a positive safe integer; ellipsis overhead is excluded. |
 | `match` | `"any"` | `"any"` matches at least one query term; `"all"` requires every term across the selected fields of one section. |
 | `fields` | All eight fields | Search `resource`, `title`, `heading`, `description`, `tags`, `type`, `sources`, and `body`. The array must be non-empty. |
 | `boost` | See below | Set a field's ranking weight. Values must be between `0.1` and `10`, inclusive. |

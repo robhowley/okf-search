@@ -40,6 +40,7 @@ const TOKENIZER: &str = "okf";
 const WRITER_HEAP_BYTES: usize = 60_000_000;
 const FETCH_FLOOR: usize = 32;
 const DEFAULT_SNIPPET_LENGTH: usize = 240;
+const SNIPPET_LOOKBEHIND: usize = 80;
 const MAX_SAFE_INTEGER: u128 = 9_007_199_254_740_991;
 
 #[napi(object)]
@@ -1634,6 +1635,41 @@ fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
     offset
 }
 
+fn snippet_start(text: &str, match_position: usize) -> usize {
+    let mut start = floor_char_boundary(text, match_position);
+    let mut remaining = SNIPPET_LOOKBEHIND;
+
+    while start > 0 {
+        let Some((char_start, character)) = text[..start].char_indices().next_back() else {
+            break;
+        };
+        let units = character.len_utf16();
+        if units > remaining {
+            break;
+        }
+        start = char_start;
+        remaining -= units;
+    }
+
+    start
+}
+
+fn end_for_utf16_budget(text: &str, start: usize, budget: usize) -> usize {
+    let mut end = start;
+    let mut remaining = budget;
+
+    for (offset, character) in text[start..].char_indices() {
+        let units = character.len_utf16();
+        if units > remaining {
+            break;
+        }
+        remaining -= units;
+        end = start + offset + character.len_utf8();
+    }
+
+    end
+}
+
 fn make_snippet(text: &str, terms: &[String], max_length: usize) -> String {
     // ASCII lowercasing keeps byte offsets aligned with the original string. For
     // non-ASCII case folding we deliberately fall back to a leading snippet.
@@ -1642,9 +1678,8 @@ fn make_snippet(text: &str, terms: &[String], max_length: usize) -> String {
         .iter()
         .filter_map(|term| lower.find(&term.to_ascii_lowercase()))
         .min();
-    let raw_start = first_match.map_or(0, |position| position.saturating_sub(80));
-    let start = floor_char_boundary(text, raw_start);
-    let end = floor_char_boundary(text, start.saturating_add(max_length).min(text.len()));
+    let start = first_match.map_or(0, |position| snippet_start(text, position));
+    let end = end_for_utf16_budget(text, start, max_length);
     let mut snippet = String::new();
     if start > 0 {
         snippet.push('…');
@@ -3246,20 +3281,105 @@ mod tests {
             .snippet;
         assert!(snippet.contains("exactsnippet"));
         assert!(snippet.starts_with('…') && snippet.ends_with('…'));
-        assert!(snippet.len() <= 246, "snippet was {} bytes", snippet.len());
+        let snippet_units = snippet
+            .chars()
+            .map(|character| character.len_utf16())
+            .sum::<usize>();
+        assert!(
+            snippet_units <= 242,
+            "snippet was {snippet_units} UTF-16 units"
+        );
     }
 
     #[test]
-    fn snippet_length_validation_uses_positive_safe_byte_counts() {
+    fn snippets_keep_ascii_windows_and_ellipsis_outside_budget() {
+        let terms = vec!["needle".to_owned()];
+        assert_eq!(
+            make_snippet("prefix needle suffix", &terms, 13),
+            "prefix needle…"
+        );
+        assert_eq!(
+            make_snippet("prefix text", &["missing".to_owned()], 4),
+            "pref…"
+        );
+
+        let text = format!("{}needle{}", "x".repeat(90), "y".repeat(200));
+        let snippet = make_snippet(&text, &terms, 100);
+        assert!(snippet.starts_with('…'));
+        assert!(snippet.ends_with('…'));
+        let window = snippet
+            .strip_prefix('…')
+            .and_then(|value| value.strip_suffix('…'))
+            .expect("snippet should have both ellipses");
+        assert_eq!(
+            window
+                .chars()
+                .map(|character| character.len_utf16())
+                .sum::<usize>(),
+            100
+        );
+        assert_eq!(
+            snippet
+                .chars()
+                .map(|character| character.len_utf16())
+                .sum::<usize>(),
+            102
+        );
+    }
+
+    #[test]
+    fn snippets_count_cjk_as_utf16_units() {
+        let text = format!("{}tail", "中".repeat(300));
+        let without_match = Vec::new();
+        let default = make_snippet(&text, &without_match, 240);
+        assert_eq!(
+            default.strip_suffix('…').expect("truncated CJK snippet"),
+            "中".repeat(240)
+        );
+        assert_eq!(default.len(), 240 * 3 + "…".len());
+        assert_eq!(
+            make_snippet(&text, &without_match, 80)
+                .strip_suffix('…')
+                .expect("short CJK snippet"),
+            "中".repeat(80)
+        );
+    }
+
+    #[test]
+    fn snippets_count_emoji_as_two_units_without_splitting_scalars() {
+        assert_eq!(make_snippet("a😀z", &[], 1), "a…");
+        assert_eq!(make_snippet("😀a😀z", &[], 3), "😀a…");
+        assert_eq!(make_snippet("ab😀z", &[], 3), "ab…");
+    }
+
+    #[test]
+    fn snippets_count_combining_marks_as_separate_units() {
+        assert_eq!(make_snippet("e\u{301}x", &[], 1), "e…");
+        assert_eq!(make_snippet("e\u{301}x", &[], 2), "e\u{301}…");
+    }
+
+    #[test]
+    fn snippets_keep_ascii_matches_after_non_ascii_lookbehind() {
+        let text = format!("{}needle{}", "中".repeat(100), "x".repeat(200));
+        let snippet = make_snippet(&text, &["needle".to_owned()], 240);
+
+        assert_eq!(
+            snippet,
+            format!("…{}needle{}…", "中".repeat(80), "x".repeat(154))
+        );
+    }
+
+    #[test]
+    fn snippet_length_validation_uses_positive_safe_integer_counts() {
         let default = resolve_options(Some(search_options(&["body"], "any")))
             .expect("default snippet length");
         assert_eq!(default.snippet_length, DEFAULT_SNIPPET_LENGTH);
 
-        let mut one_byte = search_options(&["body"], "any");
-        one_byte.snippet_length = Some(1.0);
+        let mut one_unit = search_options(&["body"], "any");
+        one_unit.snippet_length = Some(1.0);
         assert_eq!(
-            resolve_options(Some(one_byte))
-                .expect("one-byte snippet length")
+            resolve_options(Some(one_unit))
+                .expect("one-unit snippet length")
                 .snippet_length,
             1,
         );
