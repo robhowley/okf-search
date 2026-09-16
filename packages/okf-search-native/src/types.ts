@@ -183,6 +183,7 @@ export type OkfSearchField =
 
 export interface OkfSearchOptions {
   limit?: number;
+  snippetLength?: number;
   where?: {
     types?: readonly string[];
     tagsAny?: readonly string[];

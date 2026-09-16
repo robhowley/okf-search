@@ -251,6 +251,52 @@ describe("friendly search behavior", () => {
       .toHaveLength(1);
   });
 
+  it("configures UTF-8 snippet windows without changing result ordering", () => {
+    const longBody = `prefix snippetneedle ${"x".repeat(252)} larger-only`;
+    const index = createOkfSearch([
+      {
+        path: "long.md",
+        markdown: concept("type: note", longBody),
+      },
+      {
+        path: "other.md",
+        markdown: concept("type: note", "snippetneedle other"),
+      },
+    ]);
+    const order = (options?: OkfSearchOptions) =>
+      index.search("snippetneedle", options)
+        .map(({ documentId, score }) => ({ documentId, score }));
+    const omitted = index.search("snippetneedle");
+    const explicitDefault = index.search("snippetneedle", {
+      snippetLength: 240,
+    });
+    const shorter = index.search("snippetneedle", { snippetLength: 32 });
+    const longer = index.search("snippetneedle", { snippetLength: 300 });
+
+    expect(explicitDefault).toEqual(omitted);
+    expect(shorter.find((hit) => hit.documentId === "long")?.snippet)
+      .toBe(`prefix snippetneedle ${"x".repeat(11)}…`);
+    expect(longer.find((hit) => hit.documentId === "long")?.snippet)
+      .toContain("larger-only");
+    expect(Buffer.byteLength(
+      shorter.find((hit) => hit.documentId === "long")!.snippet.replace("…", ""),
+    )).toBeLessThanOrEqual(32);
+    expect(order({ snippetLength: 32 })).toEqual(order());
+    expect(order({ snippetLength: 300 })).toEqual(order());
+  });
+
+  it("measures the snippet window in UTF-8 bytes at character boundaries", () => {
+    const index = createOkfSearch([{
+      path: "unicode.md",
+      markdown: concept("type: note", `ééééé needle尾${"z".repeat(20)}`),
+    }]);
+    const hit = index.search("needle", { snippetLength: 18 })[0]!;
+
+    expect(hit.snippet).toBe("ééééé needle…");
+    expect(Buffer.byteLength(hit.snippet.replace("…", ""))).toBe(17);
+    expect(hit.snippet).not.toContain("\uFFFD");
+  });
+
   it("supports boosts without asserting cross-engine score parity", () => {
     const term = "boostneedle";
     const index = createOkfSearch([
@@ -398,6 +444,10 @@ describe("friendly search behavior", () => {
       ...invalid,
       limit: 0,
     })).toThrowError(new TypeError("options.where.stale must be a boolean"));
+    expect(() => index.search("", { snippetLength: 0 }))
+      .toThrowError(new TypeError(
+        "options.snippetLength must be a finite positive integer",
+      ));
     expect(index.search("", { limit: 0, unknown: true } as OkfSearchOptions))
       .toEqual([]);
   });

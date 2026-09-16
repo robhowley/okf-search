@@ -39,6 +39,7 @@ describe("friendly search option sanitization", () => {
     };
     const input = Object.freeze({
       limit: 3,
+      snippetLength: 128,
       asOf,
       match: "all",
       fields: Object.freeze(fields),
@@ -59,6 +60,7 @@ describe("friendly search option sanitization", () => {
 
     expect(Object.keys(dto)).toEqual([
       "limit",
+      "snippetLength",
       "where",
       "asOf",
       "match",
@@ -68,6 +70,7 @@ describe("friendly search option sanitization", () => {
     ]);
     expect(dto).toEqual({
       limit: 3,
+      snippetLength: 128,
       where,
       asOf,
       match: "all",
@@ -94,6 +97,7 @@ describe("friendly search option sanitization", () => {
 
     expect(input).toEqual({
       limit: 3,
+      snippetLength: 128,
       asOf,
       match: "all",
       fields,
@@ -123,6 +127,7 @@ describe("friendly search option sanitization", () => {
 
     expect(sanitizeSearchOptions(options({
       limit: undefined,
+      snippetLength: undefined,
       asOf: null,
       match: undefined,
       fields: undefined,
@@ -212,6 +217,38 @@ describe("friendly search option sanitization", () => {
       for (const limit of invalid) {
         expectTypeError({ limit },
           "options.limit must be a finite non-negative integer");
+      }
+    });
+  });
+
+  describe("snippetLength", () => {
+    it("accepts positive safe integers and omits the default", () => {
+      expect(sanitizeSearchOptions(options({ snippetLength: 1 })))
+        .toEqual({ snippetLength: 1 });
+      expect(sanitizeSearchOptions(options({
+        snippetLength: Number.MAX_SAFE_INTEGER,
+      }))).toEqual({ snippetLength: Number.MAX_SAFE_INTEGER });
+      expect(sanitizeSearchOptions()).toEqual({});
+    });
+
+    it("rejects non-positive, non-integer, non-finite, and non-number values", () => {
+      for (const snippetLength of [
+        0,
+        -1,
+        1.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.MAX_SAFE_INTEGER + 1,
+        null,
+        "1",
+        true,
+        1n,
+        {},
+        [],
+      ]) {
+        expectTypeError({ snippetLength },
+          "options.snippetLength must be a finite positive integer");
       }
     });
   });

@@ -109,7 +109,7 @@ type ExactSearchField = Assert<Same<
 >>;
 type ExactSearchKeys = Assert<Same<
   keyof OkfSearchOptions,
-  "limit" | "where" | "asOf" | "match" | "fields" | "boost" | "fuzzy"
+  "limit" | "snippetLength" | "where" | "asOf" | "match" | "fields" | "boost" | "fuzzy"
 >>;
 type ExactWhereKeys = Assert<Same<
   keyof NonNullable<OkfSearchOptions["where"]>,
@@ -151,6 +151,7 @@ const validation: OkfValidationResult = validateOkfDocument({
 declare const stats: OkfIndexStats;
 const sizeInBytes: number = stats.storage.sizeInBytes;
 const options: OkfSearchOptions = {
+  snippetLength: 240,
   match: "all",
   fields: ["title", "heading", "body"] as const,
   where: {

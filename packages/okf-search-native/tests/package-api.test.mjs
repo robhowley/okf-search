@@ -300,6 +300,42 @@ test("prepared search rejects malformed where and boost containers", () => {
   assert.equal(index.search(marker, { boost: {} }).length, 1);
 });
 
+test("prepared search validates snippetLength without truncation", () => {
+  const { NativeOkfSearch } = require("okf-search-native/prepared");
+  const marker = "prepared-snippet-length-marker";
+  const index = NativeOkfSearch.fromPrepared([
+    preparedDocument("prepared-snippet-length", marker),
+  ]);
+
+  assert.equal(index.search(marker, { snippetLength: 1 }).length, 1);
+  assert.equal(
+    index.search(marker, { snippetLength: Number.MAX_SAFE_INTEGER }).length,
+    1,
+  );
+  for (const snippetLength of [
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(
+      () => index.search(marker, { snippetLength }),
+      isInvalidSearchOptions,
+      `snippetLength=${String(snippetLength)}`,
+    );
+  }
+
+  for (const snippetLength of [null, "1", true, 1n, {}, []]) {
+    assert.throws(
+      () => index.search(marker, { snippetLength }),
+      `snippetLength=${String(snippetLength)}`,
+    );
+  }
+});
+
 test("prepared search option getters can reenter read-only native inventory", async () => {
   const document = preparedDocument("prepared-reentry", "prepared-reentry-marker");
   const script = `

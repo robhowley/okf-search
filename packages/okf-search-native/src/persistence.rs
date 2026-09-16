@@ -818,6 +818,7 @@ mod tests {
         let restored = load(&path).unwrap().unwrap();
         let options = Some(SearchOptions {
             limit: None,
+            snippet_length: None,
             where_filter: Some(SearchWhere {
                 types: Some(vec!["concept".into()]),
                 tags_any: Some(vec!["persistence".into()]),
@@ -1409,6 +1410,7 @@ mod tests {
                         "persistence",
                         Some(SearchOptions {
                             limit: Some(1000.0),
+                            snippet_length: None,
                             where_filter: None,
                             as_of: None,
                             match_mode: None,

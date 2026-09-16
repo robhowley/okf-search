@@ -39,6 +39,7 @@ const TOKENIZER: &str = "okf";
 // Tantivy requires 15 MB per worker; this allows up to four, bounded by available CPUs.
 const WRITER_HEAP_BYTES: usize = 60_000_000;
 const FETCH_FLOOR: usize = 32;
+const DEFAULT_SNIPPET_LENGTH: usize = 240;
 const MAX_SAFE_INTEGER: u128 = 9_007_199_254_740_991;
 
 #[napi(object)]
@@ -122,6 +123,8 @@ pub struct SearchBoost {
 #[derive(Clone, Debug)]
 pub struct SearchOptions {
     pub limit: Option<f64>,
+    #[napi(js_name = "snippetLength")]
+    pub snippet_length: Option<f64>,
     #[napi(js_name = "where")]
     pub where_filter: Option<SearchWhere>,
     #[napi(js_name = "asOf")]
@@ -421,6 +424,7 @@ struct ResolvedWhere {
 #[derive(Clone, Debug)]
 struct ResolvedOptions {
     limit: usize,
+    snippet_length: usize,
     where_filter: ResolvedWhere,
     as_of_epoch: i64,
     match_all: bool,
@@ -551,7 +555,14 @@ fn parse_search_options(options: Option<Object<'_>>) -> NapiResult<Option<Search
         &object,
         "search option",
         &[
-            "limit", "where", "asOf", "match", "fields", "boost", "fuzzy",
+            "limit",
+            "snippetLength",
+            "where",
+            "asOf",
+            "match",
+            "fields",
+            "boost",
+            "fuzzy",
         ],
     )?;
     validate_nested_option_keys(
@@ -590,6 +601,7 @@ fn parse_search_options(options: Option<Object<'_>>) -> NapiResult<Option<Search
 fn resolve_options(options: Option<SearchOptions>) -> NapiResult<ResolvedOptions> {
     let options = options.unwrap_or(SearchOptions {
         limit: None,
+        snippet_length: None,
         where_filter: None,
         as_of: None,
         match_mode: None,
@@ -653,8 +665,23 @@ fn resolve_options(options: Option<SearchOptions>) -> NapiResult<ResolvedOptions
         ));
     }
 
+    let snippet_length = options
+        .snippet_length
+        .unwrap_or(DEFAULT_SNIPPET_LENGTH as f64);
+    if !snippet_length.is_finite()
+        || snippet_length <= 0.0
+        || snippet_length.fract() != 0.0
+        || snippet_length > MAX_SAFE_INTEGER as f64
+        || snippet_length > usize::MAX as f64
+    {
+        return Err(invalid_options(
+            "snippetLength must be a finite positive integer",
+        ));
+    }
+
     Ok(ResolvedOptions {
         limit: limit as usize,
+        snippet_length: snippet_length as usize,
         where_filter: resolve_where(options.where_filter)?,
         as_of_epoch: options.as_of.unwrap_or_else(Utc::now).timestamp_millis(),
         match_all,
@@ -1682,7 +1709,7 @@ fn to_hit(
         path: record.path,
         start_line: record.start_line,
         end_line: record.end_line,
-        snippet: make_snippet(&record.text, &plan.terms, 240),
+        snippet: make_snippet(&record.text, &plan.terms, plan.options.snippet_length),
     })
 }
 
@@ -2163,6 +2190,7 @@ mod tests {
     fn options(where_filter: Option<SearchWhere>, as_of_epoch: i64) -> SearchOptions {
         SearchOptions {
             limit: Some(50.0),
+            snippet_length: None,
             where_filter,
             as_of: Some(
                 DateTime::<Utc>::from_timestamp_millis(as_of_epoch).expect("fixture timestamp"),
@@ -2560,6 +2588,7 @@ mod tests {
     fn search_options(fields: &[&str], match_mode: &str) -> SearchOptions {
         SearchOptions {
             limit: Some(50.0),
+            snippet_length: None,
             where_filter: None,
             as_of: Some(DateTime::<Utc>::UNIX_EPOCH),
             match_mode: Some(match_mode.to_owned()),
@@ -3218,6 +3247,42 @@ mod tests {
         assert!(snippet.contains("exactsnippet"));
         assert!(snippet.starts_with('…') && snippet.ends_with('…'));
         assert!(snippet.len() <= 246, "snippet was {} bytes", snippet.len());
+    }
+
+    #[test]
+    fn snippet_length_validation_uses_positive_safe_byte_counts() {
+        let default = resolve_options(Some(search_options(&["body"], "any")))
+            .expect("default snippet length");
+        assert_eq!(default.snippet_length, DEFAULT_SNIPPET_LENGTH);
+
+        let mut one_byte = search_options(&["body"], "any");
+        one_byte.snippet_length = Some(1.0);
+        assert_eq!(
+            resolve_options(Some(one_byte))
+                .expect("one-byte snippet length")
+                .snippet_length,
+            1,
+        );
+
+        for value in [
+            0.0,
+            -1.0,
+            1.5,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            MAX_SAFE_INTEGER as f64 + 1.0,
+        ] {
+            let mut invalid = search_options(&["body"], "any");
+            invalid.snippet_length = Some(value);
+            let error = resolve_options(Some(invalid)).expect_err("invalid snippet length");
+            assert!(
+                error
+                    .to_string()
+                    .contains("[ERR_OKF_INVALID_SEARCH_OPTIONS] snippetLength must be a finite positive integer"),
+                "unexpected error: {error}"
+            );
+        }
     }
 
     #[test]
