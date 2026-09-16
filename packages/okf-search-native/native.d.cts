@@ -134,6 +134,10 @@ export interface SearchHit {
 
 export interface SearchOptions {
   limit?: number
+  /**
+   * Maximum section-text window in UTF-16 code units, like JavaScript's
+   * `String.length`; ellipsis markers are outside this budget.
+   */
   snippetLength?: number
   where?: SearchWhere
   asOf?: Date

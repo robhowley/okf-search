@@ -183,6 +183,7 @@ export type OkfSearchField =
 
 export interface OkfSearchOptions {
   limit?: number;
+  /** Maximum section-text window in UTF-16 code units, like String.length. */
   snippetLength?: number;
   where?: {
     types?: readonly string[];
