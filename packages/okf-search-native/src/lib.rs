@@ -23,7 +23,7 @@ use tantivy::collector::{Count, TopDocs};
 use tantivy::directory::RamDirectory;
 use tantivy::query::{
     BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EnableScoring,
-    FastFieldRangeQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery,
+    FastFieldRangeQuery, Occur, PhraseQuery, Query, TermQuery, TermSetQuery,
 };
 use tantivy::schema::{
     FAST, Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument,
@@ -681,42 +681,130 @@ fn fuzzy_distance(term: &str, ratio: f64) -> u8 {
     ((term.chars().count() as f64 * ratio).round() as u8).clamp(1, 2)
 }
 
-// The actual branch builder is kept separate so the string is available for
-// the fuzzy ratio → discrete edit-distance mapping.
+// Adapt Tantivy's Levenshtein DFAs to dictionary traversal. The automaton
+// decides vocabulary membership; matching terms are scored as ordinary terms.
+struct FuzzyAutomaton(levenshtein_automata::DFA);
+
+impl tantivy_fst::Automaton for FuzzyAutomaton {
+    type State = u32;
+
+    fn start(&self) -> u32 {
+        self.0.initial_state()
+    }
+    fn is_match(&self, state: &u32) -> bool {
+        matches!(
+            self.0.distance(*state),
+            levenshtein_automata::Distance::Exact(_)
+        )
+    }
+    fn can_match(&self, state: &u32) -> bool {
+        *state != levenshtein_automata::SINK_STATE
+    }
+    fn accept(&self, state: &u32, byte: u8) -> u32 {
+        self.0.transition(*state, byte)
+    }
+}
+
+type Expansions = HashMap<(SearchField, usize), BTreeMap<Vec<u8>, f32>>;
+
+fn expand_terms(
+    plan: &QueryPlan,
+    fields: &Fields,
+    searcher: &tantivy::Searcher,
+) -> tantivy::Result<Expansions> {
+    static BUILDERS: [std::sync::OnceLock<levenshtein_automata::LevenshteinAutomatonBuilder>; 2] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    let mut expansions = HashMap::new();
+    for (index, text) in plan.terms.iter().enumerate() {
+        let prefix = index + 1 == plan.terms.len() && text.chars().count() >= 3;
+        let distance = fuzzy_distance(text, plan.options.fuzzy_ratio);
+        let (fuzzy, fuzzy_prefix) = if distance > 0 {
+            let builder = BUILDERS[distance as usize - 1].get_or_init(|| {
+                levenshtein_automata::LevenshteinAutomatonBuilder::new(distance, true)
+            });
+            (
+                Some(FuzzyAutomaton(builder.build_dfa(text))),
+                prefix.then(|| FuzzyAutomaton(builder.build_prefix_dfa(text))),
+            )
+        } else {
+            (None, None)
+        };
+        for &field in &plan.options.fields {
+            let mut candidates = BTreeMap::from([(text.as_bytes().to_vec(), 1.0_f32)]);
+            if prefix || fuzzy.is_some() {
+                for segment in searcher.segment_readers() {
+                    let inverted = segment.inverted_index(fields.searchable(field))?;
+                    let dictionary = inverted.terms();
+                    if prefix {
+                        // Seek to the literal prefix, stopping at the first non-prefix key.
+                        let mut stream = dictionary.range().ge(text.as_bytes()).into_stream()?;
+                        while stream.advance() {
+                            if !stream.key().starts_with(text.as_bytes()) {
+                                break;
+                            }
+                            candidates.entry(stream.key().to_vec()).or_insert(0.5);
+                        }
+                    }
+                    if let Some(automaton) = &fuzzy {
+                        let mut stream = dictionary.search(automaton).into_stream()?;
+                        while stream.advance() {
+                            // Classify independently of segment traversal order.
+                            let weight = if stream.key() == text.as_bytes() {
+                                1.0
+                            } else if prefix && stream.key().starts_with(text.as_bytes()) {
+                                0.5
+                            } else {
+                                0.25
+                            };
+                            candidates.entry(stream.key().to_vec()).or_insert(weight);
+                        }
+                    }
+                    if let Some(automaton) = &fuzzy_prefix {
+                        let mut stream = dictionary.search(automaton).into_stream()?;
+                        while stream.advance() {
+                            // Exact, literal-prefix, and whole-word fuzzy matches were inserted first.
+                            let weight = if stream.key() == text.as_bytes() {
+                                1.0
+                            } else if stream.key().starts_with(text.as_bytes()) {
+                                0.5
+                            } else {
+                                0.10
+                            };
+                            candidates.entry(stream.key().to_vec()).or_insert(weight);
+                        }
+                    }
+                }
+            }
+            expansions.insert((field, index), candidates);
+        }
+    }
+    Ok(expansions)
+}
+
 fn field_term_query_text(
     plan: &QueryPlan,
     fields: &Fields,
+    expansions: &Expansions,
     field: SearchField,
-    text: &str,
-    final_term: bool,
+    index: usize,
     apply_field_boost: bool,
 ) -> Box<dyn Query> {
-    let term = Term::from_field_text(fields.searchable(field), text);
-    let mut alternatives: Vec<Box<dyn Query>> = vec![Box::new(TermQuery::new(
-        term.clone(),
-        IndexRecordOption::WithFreqs,
-    ))];
-    let distance = fuzzy_distance(text, plan.options.fuzzy_ratio);
-
-    if distance > 0 {
-        alternatives.push(Box::new(BoostQuery::new(
-            Box::new(FuzzyTermQuery::new(term.clone(), distance, true)),
-            0.70,
-        )));
-    }
-    if final_term && text.chars().count() >= 3 {
-        alternatives.push(Box::new(BoostQuery::new(
-            Box::new(FuzzyTermQuery::new_prefix(term, distance, true)),
-            0.50,
-        )));
-    }
+    let mut alternatives: Vec<Box<dyn Query>> = expansions[&(field, index)]
+        .iter()
+        .map(|(text, weight)| {
+            let term = Term::from_field_text(
+                fields.searchable(field),
+                std::str::from_utf8(text).expect("text dictionary contains UTF-8"),
+            );
+            let query = Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs));
+            Box::new(BoostQuery::new(query, *weight)) as Box<dyn Query>
+        })
+        .collect();
 
     let mut query: Box<dyn Query> = if alternatives.len() == 1 {
         alternatives.pop().expect("exact query")
     } else {
-        // Exact, fuzzy, and prefix are alternative interpretations of one
-        // term/field match. Disjunction-max avoids triple-counting an exact
-        // term that also satisfies the fuzzy and prefix branches.
+        // Alternative spellings within one token/field compete rather than add.
         Box::new(DisjunctionMaxQuery::new(alternatives))
     };
     if apply_field_boost {
@@ -728,23 +816,24 @@ fn field_term_query_text(
     query
 }
 
-fn build_text_query(plan: &QueryPlan, fields: &Fields) -> Option<Box<dyn Query>> {
+fn build_text_query(
+    plan: &QueryPlan,
+    fields: &Fields,
+    expansions: &Expansions,
+) -> Option<Box<dyn Query>> {
     if plan.terms.is_empty() {
         return None;
     }
-    let final_index = plan.terms.len() - 1;
     let term_queries: Vec<Box<dyn Query>> = plan
         .terms
         .iter()
         .enumerate()
-        .map(|(index, term)| {
+        .map(|(index, _term)| {
             let field_queries: Vec<Box<dyn Query>> = plan
                 .options
                 .fields
                 .iter()
-                .map(|field| {
-                    field_term_query_text(plan, fields, *field, term, index == final_index, true)
-                })
+                .map(|field| field_term_query_text(plan, fields, expansions, *field, index, true))
                 .collect();
             Box::new(BooleanQuery::union(field_queries)) as Box<dyn Query>
         })
@@ -754,7 +843,27 @@ fn build_text_query(plan: &QueryPlan, fields: &Fields) -> Option<Box<dyn Query>>
     } else {
         Box::new(BooleanQuery::union(term_queries))
     };
-    Some(query)
+    if plan.terms.len() == 1 {
+        return Some(query);
+    }
+    // The existing word query alone controls eligibility. Exact, consecutive
+    // phrases add scores within selected fields; they never replace word matches.
+    let mut clauses = vec![(Occur::Must, query)];
+    for &field in &plan.options.fields {
+        let terms = plan
+            .terms
+            .iter()
+            .map(|text| Term::from_field_text(fields.searchable(field), text))
+            .collect();
+        clauses.push((
+            Occur::Should,
+            Box::new(BoostQuery::new(
+                Box::new(PhraseQuery::new(terms)),
+                1.50 * plan.options.boosts[&field],
+            )),
+        ));
+    }
+    Some(Box::new(BooleanQuery::new(clauses)))
 }
 
 fn exact_values_query(field: Field, values: &BTreeSet<String>) -> Box<dyn Query> {
@@ -827,8 +936,12 @@ fn build_filter_query(
     }
 }
 
-fn build_query(plan: &QueryPlan, fields: &Fields) -> Option<Box<dyn Query>> {
-    let text_query = build_text_query(plan, fields)?;
+fn build_query(
+    plan: &QueryPlan,
+    fields: &Fields,
+    expansions: &Expansions,
+) -> Option<Box<dyn Query>> {
+    let text_query = build_text_query(plan, fields, expansions)?;
     let Some(filter_query) =
         build_filter_query(&plan.options.where_filter, fields, plan.options.as_of_epoch)
     else {
@@ -847,15 +960,17 @@ fn build_query(plan: &QueryPlan, fields: &Fields) -> Option<Box<dyn Query>> {
     ])))
 }
 
-fn field_probe(plan: &QueryPlan, fields: &Fields, field: SearchField) -> Box<dyn Query> {
-    let final_index = plan.terms.len() - 1;
+fn field_probe(
+    plan: &QueryPlan,
+    fields: &Fields,
+    expansions: &Expansions,
+    field: SearchField,
+) -> Box<dyn Query> {
     let clauses: Vec<Box<dyn Query>> = plan
         .terms
         .iter()
         .enumerate()
-        .map(|(index, term)| {
-            field_term_query_text(plan, fields, field, term, index == final_index, false)
-        })
+        .map(|(index, _term)| field_term_query_text(plan, fields, expansions, field, index, false))
         .collect();
     Box::new(BooleanQuery::union(clauses))
 }
@@ -1238,12 +1353,14 @@ impl Engine {
         if plan.terms.is_empty() || plan.options.limit == 0 {
             return Ok(Vec::new());
         }
-        let query = build_query(&plan, &self.fields).expect("non-empty query");
         let searcher = self.reader.searcher();
         let live = searcher.num_docs() as usize;
         if live == 0 {
             return Ok(Vec::new());
         }
+        let expansions =
+            expand_terms(&plan, &self.fields, &searcher).map_err(|e| native_error(e.into()))?;
+        let query = build_query(&plan, &self.fields, &expansions).expect("non-empty query");
 
         let mut fetch = plan
             .options
@@ -1294,7 +1411,7 @@ impl Engine {
         match selected
             .into_iter()
             .take(plan.options.limit)
-            .map(|candidate| to_hit(&searcher, &self.fields, &plan, candidate))
+            .map(|candidate| to_hit(&searcher, &self.fields, &plan, &expansions, candidate))
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(hits) => Ok(hits),
@@ -1633,6 +1750,7 @@ fn matched_fields(
     searcher: &tantivy::Searcher,
     fields: &Fields,
     plan: &QueryPlan,
+    expansions: &Expansions,
     address: DocAddress,
 ) -> Vec<String> {
     plan.options
@@ -1640,7 +1758,7 @@ fn matched_fields(
         .iter()
         .copied()
         .filter(|field| {
-            let probe = field_probe(plan, fields, *field);
+            let probe = field_probe(plan, fields, expansions, *field);
             query_matches_address(searcher, probe.as_ref(), address)
         })
         .map(|field| field.name().to_owned())
@@ -1667,10 +1785,11 @@ fn to_hit(
     searcher: &tantivy::Searcher,
     fields: &Fields,
     plan: &QueryPlan,
+    expansions: &Expansions,
     candidate: Candidate,
 ) -> Result<SearchHit, EngineError> {
     let record = candidate.record;
-    let matched_fields = matched_fields(searcher, fields, plan, record.address);
+    let matched_fields = matched_fields(searcher, fields, plan, expansions, record.address);
     Ok(SearchHit {
         document_id: record.document_id,
         title: record.title,
@@ -2310,8 +2429,12 @@ mod tests {
             terms: tokenize("memory"),
             options: resolve_options(Some(options(None, BEFORE))).expect("unfiltered options"),
         };
-        let unfiltered_query =
-            build_query(&unfiltered_plan, &engine.fields).expect("unfiltered query");
+        let unfiltered_query = build_query(
+            &unfiltered_plan,
+            &engine.fields,
+            &expand_terms(&unfiltered_plan, &engine.fields, &engine.reader.searcher()).unwrap(),
+        )
+        .expect("unfiltered query");
         assert_eq!(
             searcher
                 .search(unfiltered_query.as_ref(), &Count)
@@ -2328,7 +2451,12 @@ mod tests {
             options: resolve_options(Some(options(Some(filter), BEFORE)))
                 .expect("filtered options"),
         };
-        let filtered_query = build_query(&filtered_plan, &engine.fields).expect("filtered query");
+        let filtered_query = build_query(
+            &filtered_plan,
+            &engine.fields,
+            &expand_terms(&filtered_plan, &engine.fields, &engine.reader.searcher()).unwrap(),
+        )
+        .expect("filtered query");
         assert_eq!(
             searcher
                 .search(filtered_query.as_ref(), &Count)
@@ -2567,6 +2695,450 @@ mod tests {
             boost: None,
             fuzzy: None,
         }
+    }
+
+    #[test]
+    fn exact_phrase_bonus_is_additive_and_never_changes_eligibility() {
+        let mut split = document(section("split", "safety"));
+        split.title = "memory".into();
+        let mut both = document(section("both", "memory safety"));
+        both.title = "memory safety".into();
+        let mut excluded = document(section("excluded", "memory safety"));
+        excluded.status = Some("draft".into());
+        let engine = Engine::new(vec![
+            document(section("phrase", "memory safety")),
+            document(section("reverse", "safety memory")),
+            document(section("gap", "memory extra safety")),
+            document(section("partial", "memory")),
+            document(section("prefix", "memory safetyguide")),
+            document(section("typo", "memory saftey")),
+            split,
+            both,
+            excluded,
+        ])
+        .unwrap();
+        let searcher = engine.reader.searcher();
+        for text in ["MEMORY, safety", "memory"] {
+            for mode in ["any", "all"] {
+                for filtered in [false, true] {
+                    let mut options = search_options(&["body", "title"], mode);
+                    options.fuzzy = Some(Either::A(true));
+                    options.boost = Some(SearchBoost {
+                        body: Some(2.0),
+                        title: Some(3.0),
+                        resource: None,
+                        heading: None,
+                        description: None,
+                        tags: None,
+                        document_type: None,
+                        sources: None,
+                    });
+                    if filtered {
+                        let mut filter = where_filter();
+                        filter.statuses = Some(vec!["stable".into()]);
+                        options.where_filter = Some(filter);
+                    }
+                    let plan = QueryPlan {
+                        terms: tokenize(text),
+                        options: resolve_options(Some(options.clone())).unwrap(),
+                    };
+                    let expansions = expand_terms(&plan, &engine.fields, &searcher).unwrap();
+                    let words = plan
+                        .terms
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            Box::new(BooleanQuery::union(
+                                plan.options
+                                    .fields
+                                    .iter()
+                                    .map(|&field| {
+                                        field_term_query_text(
+                                            &plan,
+                                            &engine.fields,
+                                            &expansions,
+                                            field,
+                                            i,
+                                            true,
+                                        )
+                                    })
+                                    .collect(),
+                            )) as Box<dyn Query>
+                        })
+                        .collect();
+                    let base = if mode == "all" {
+                        BooleanQuery::intersection(words)
+                    } else {
+                        BooleanQuery::union(words)
+                    };
+                    let mut expected = HashMap::new();
+                    for (score, address) in searcher
+                        .search(&base, &TopDocs::with_limit(50).order_by_score())
+                        .unwrap()
+                    {
+                        let id = read_record(&searcher, &engine.fields, address)
+                            .unwrap()
+                            .document_id;
+                        if !filtered || id != "excluded" {
+                            expected.insert(id, f64::from(score));
+                        }
+                    }
+                    if plan.terms.len() > 1 {
+                        for (field, boost, ids) in [
+                            (SearchField::Body, 2.0, vec!["phrase", "both", "excluded"]),
+                            (SearchField::Title, 3.0, vec!["both"]),
+                        ] {
+                            let phrase = PhraseQuery::new(
+                                plan.terms
+                                    .iter()
+                                    .map(|term| {
+                                        Term::from_field_text(engine.fields.searchable(field), term)
+                                    })
+                                    .collect(),
+                            );
+                            let scores = searcher
+                                .search(&phrase, &TopDocs::with_limit(50).order_by_score())
+                                .unwrap();
+                            let mut matched = BTreeSet::new();
+                            for (score, address) in scores {
+                                let id = read_record(&searcher, &engine.fields, address)
+                                    .unwrap()
+                                    .document_id;
+                                matched.insert(id.clone());
+                                if let Some(total) = expected.get_mut(&id) {
+                                    *total += f64::from(score) * 1.5 * boost;
+                                }
+                            }
+                            assert_eq!(matched, ids.into_iter().map(str::to_owned).collect());
+                        }
+                    }
+                    let hits = engine.search(text, Some(options)).unwrap();
+                    assert_eq!(hits.len(), expected.len());
+                    for hit in hits {
+                        assert!(
+                            (hit.score - expected[&hit.document_id]).abs() < 1e-5,
+                            "{text} {mode} {}",
+                            hit.document_id
+                        );
+                        if hit.document_id == "split" && plan.terms.len() > 1 {
+                            assert_eq!(hit.matched_fields, ["body", "title"]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fuzzy_expansions_allow_initial_character_corrections_and_keep_full_token_edits() {
+        for (query, accepted, rejected) in [
+            (
+                "runbook",
+                vec![
+                    "runbok",
+                    "rnubook",
+                    "runboking",
+                    "sunbook",
+                    "urnbook",
+                    "unbook",
+                    "xrunbook",
+                ],
+                vec!["sxnbook"],
+            ),
+            (
+                "éclair",
+                vec![
+                    "écliar",
+                    "éclai",
+                    "éclxirlong",
+                    "èclair",
+                    "èclairlong",
+                    "eclair",
+                ],
+                vec!["xyz"],
+            ),
+            (
+                "𐐨abcd",
+                vec!["𐐨acbd", "𐐨abxdlong", "𐐩abcd", "𐐩abcdlong"],
+                vec![],
+            ),
+            ("ab", vec!["ac", "a", "ba", "xb", "b"], vec!["xy"]),
+        ] {
+            let docs = accepted
+                .iter()
+                .chain(&rejected)
+                .enumerate()
+                .map(|(i, term)| document(section(&format!("doc{i}"), term)))
+                .collect();
+            let engine = Engine::new(docs).unwrap();
+            for final_token in [false, true] {
+                let mut options = search_options(&["body"], "any");
+                options.fuzzy = Some(Either::B(0.01)); // one edit, including transpositions
+                let plan = QueryPlan {
+                    terms: if final_token {
+                        vec![query.into()]
+                    } else {
+                        vec![query.into(), "missing".into()]
+                    },
+                    options: resolve_options(Some(options)).unwrap(),
+                };
+                let expansions =
+                    expand_terms(&plan, &engine.fields, &engine.reader.searcher()).unwrap();
+                let candidates = &expansions[&(SearchField::Body, 0)];
+                for &term in &rejected {
+                    assert!(!candidates.contains_key(term.as_bytes()), "{query}: {term}");
+                }
+                for &term in &accepted {
+                    // Longer completions exercise only the final-token fuzzy-prefix branch.
+                    let completion = term.ends_with("long") || term == "runboking";
+                    assert_eq!(
+                        candidates.contains_key(term.as_bytes()),
+                        !completion || final_token,
+                        "{query}: {term}"
+                    );
+                    if let Some(weight) = candidates.get(term.as_bytes()) {
+                        assert_eq!(*weight, if completion { 0.10 } else { 0.25 });
+                    }
+                }
+                let hits = engine
+                    .search(
+                        query,
+                        Some({
+                            let mut options = search_options(&["body"], "any");
+                            options.fuzzy = Some(Either::B(0.01));
+                            options
+                        }),
+                    )
+                    .unwrap();
+                assert_eq!(hits.len(), accepted.len());
+                assert!(hits.iter().all(|hit| hit.matched_fields == ["body"]));
+            }
+        }
+    }
+
+    #[test]
+    fn fuzzy_initial_character_corrections_recover_match_all_queries() {
+        let engine = Engine::new(vec![
+            document(section("tantivy", "tantivy guide")),
+            document(section("native-search", "native search")),
+        ])
+        .unwrap();
+        let ids = |text: &str| {
+            let mut options = search_options(&["body"], "all");
+            options.fuzzy = Some(Either::A(true));
+            engine
+                .search(text, Some(options))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.document_id)
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(ids("xantivy"), BTreeSet::from(["tantivy".to_owned()]));
+        assert_eq!(ids("guide xantivy"), BTreeSet::from(["tantivy".to_owned()]));
+        assert_eq!(
+            ids("xative search"),
+            BTreeSet::from(["native-search".to_owned()])
+        );
+    }
+
+    #[test]
+    fn bm25_expansions_use_weighted_term_scores_and_dismax() {
+        let engine = Engine::new(vec![
+            document(section("exact", "runbook")),
+            document(section("prefix", "runbooks")),
+            document(section("fuzzy", "runbok")),
+            document(section("fuzzy-prefix", "runboking")),
+            document(section(
+                "combined",
+                "runbook runbooks runbok runboking runbooks",
+            )),
+        ])
+        .unwrap();
+        let mut options = search_options(&["body"], "any");
+        options.fuzzy = Some(Either::A(true));
+        let hits = engine.search("runbook", Some(options)).unwrap();
+        assert_eq!(hits.len(), 5);
+        let searcher = engine.reader.searcher();
+        let mut expected = HashMap::<String, f32>::new();
+        // `runbook` matches all classes; exact wins. `runbooks` matches both
+        // prefix classes and whole-word fuzzy; .5 wins. `runbok` matches
+        // both fuzzy classes; .25 wins. Only `runboking` gets .10.
+        for (text, weight) in [
+            ("runbook", 1.0),
+            ("runbooks", 0.5),
+            ("runbok", 0.25),
+            ("runboking", 0.10),
+        ] {
+            let query = TermQuery::new(
+                Term::from_field_text(engine.fields.searchable(SearchField::Body), text),
+                IndexRecordOption::WithFreqs,
+            );
+            for (score, address) in searcher
+                .search(&query, &TopDocs::with_limit(10).order_by_score())
+                .unwrap()
+            {
+                let id = read_record(&searcher, &engine.fields, address)
+                    .unwrap()
+                    .document_id;
+                let best = expected.entry(id).or_default();
+                *best = best.max(score * weight);
+            }
+        }
+        for hit in hits {
+            assert!(
+                (hit.score - expected[&hit.document_id] as f64).abs() < 1e-6,
+                "{}",
+                hit.document_id
+            );
+            assert_eq!(hit.matched_fields, ["body"]);
+        }
+    }
+
+    #[test]
+    fn bm25_prefix_is_literal_or_fuzzy_final_and_at_least_three_characters() {
+        let engine = Engine::new(vec![
+            document(section("completion", "runbooks guide")),
+            document(section("typo-completion", "runboks guide")),
+            document(section("fuzzy-prefix", "tantivy guide")),
+            document(section("short", "runner guide")),
+            document(section("transpose", "rnu guide")),
+        ])
+        .unwrap();
+        let ids = |text: &str, fuzzy: bool| {
+            let mut options = search_options(&["body"], "all");
+            options.fuzzy = Some(Either::A(fuzzy));
+            engine
+                .search(text, Some(options))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.document_id)
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            ids("guide runbook", false),
+            BTreeSet::from(["completion".to_owned()])
+        );
+        assert!(ids("runbook guide", false).is_empty());
+        assert!(ids("guide ta", true).is_empty());
+        assert_eq!(
+            ids("guide tantv", true),
+            BTreeSet::from(["fuzzy-prefix".to_owned()])
+        );
+        let mut fuzzy_prefix_options = search_options(&["body"], "any");
+        fuzzy_prefix_options.fuzzy = Some(Either::A(true));
+        let fuzzy_prefix_hit = engine
+            .search("tantv", Some(fuzzy_prefix_options))
+            .unwrap()
+            .into_iter()
+            .find(|hit| hit.document_id == "fuzzy-prefix")
+            .expect("fuzzy-prefix hit");
+        let searcher = engine.reader.searcher();
+        let tantivy_query = TermQuery::new(
+            Term::from_field_text(engine.fields.body, "tantivy"),
+            IndexRecordOption::WithFreqs,
+        );
+        let (tantivy_score, address) = searcher
+            .search(&tantivy_query, &TopDocs::with_limit(1).order_by_score())
+            .unwrap()[0];
+        assert_eq!(
+            read_record(&searcher, &engine.fields, address)
+                .unwrap()
+                .document_id,
+            "fuzzy-prefix"
+        );
+        assert!((fuzzy_prefix_hit.score - f64::from(tantivy_score) * 0.10).abs() < 1e-6);
+        assert!(ids("guide tantv", false).is_empty());
+        assert!(ids("tantv guide", true).is_empty());
+        assert_eq!(
+            ids("guide runbook", true),
+            BTreeSet::from(["completion".to_owned(), "typo-completion".to_owned()])
+        );
+        assert!(ids("guide run", true).contains("transpose"));
+        assert!(!ids("guide run", false).contains("transpose"));
+    }
+
+    #[test]
+    fn bm25_expansions_deduplicate_segments_and_use_the_supplied_snapshot() {
+        let mut engine = Engine::new(vec![document(section(
+            "first",
+            "runbooks runbok runboking",
+        ))])
+        .unwrap();
+        engine
+            .writer
+            .set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
+        let old = engine.reader.searcher();
+        engine
+            .ingest(document(section(
+                "second",
+                "runbooks runbok runboking runbooking",
+            )))
+            .unwrap();
+        let searcher = engine.reader.searcher();
+        assert!(searcher.segment_readers().len() >= 2);
+        let mut options = search_options(&["body"], "any");
+        options.fuzzy = Some(Either::A(true));
+        let plan = QueryPlan {
+            terms: tokenize("runbook"),
+            options: resolve_options(Some(options)).unwrap(),
+        };
+        let old_expansions = expand_terms(&plan, &engine.fields, &old).unwrap();
+        let expansions = expand_terms(&plan, &engine.fields, &searcher).unwrap();
+        let key = (SearchField::Body, 0);
+        assert_eq!(old_expansions[&key].len(), 4);
+        assert_eq!(
+            expansions[&key],
+            BTreeMap::from([
+                (b"runbook".to_vec(), 1.0),
+                (b"runbooks".to_vec(), 0.5),
+                (b"runbok".to_vec(), 0.25),
+                (b"runboking".to_vec(), 0.10),
+                (b"runbooking".to_vec(), 0.5),
+            ])
+        );
+    }
+
+    #[test]
+    fn bm25_fields_and_words_add_and_filters_do_not_score() {
+        let mut doc = document(section("both", "runbooks guide"));
+        doc.title = "runbooks guide".to_owned();
+        let engine = Engine::new(vec![doc, document(section("one", "runbooks"))]).unwrap();
+        let score = |text: &str, fields: &[&str], mode: &str, filter: bool| {
+            let mut options = search_options(fields, mode);
+            if filter {
+                options.where_filter = Some(SearchWhere {
+                    statuses: Some(vec!["stable".to_owned()]),
+                    types: None,
+                    tags_any: None,
+                    trust_tiers: None,
+                    stale: None,
+                    conformance: None,
+                });
+            }
+            engine
+                .search(text, Some(options))
+                .unwrap()
+                .into_iter()
+                .find(|hit| hit.document_id == "both")
+                .unwrap()
+                .score
+        };
+        let body = score("runbook", &["body"], "any", false);
+        let title = score("runbook", &["title"], "any", false);
+        let both = score("runbook", &["body", "title"], "any", false);
+        assert!((both - body - title).abs() < 1e-6);
+        // Keep the completion final in both queries.
+        let words = score("guide runbook", &["body"], "any", false);
+        assert!((words - body - score("guide", &["body"], "any", false)).abs() < 1e-6);
+        assert_eq!(words, score("guide runbook", &["body"], "all", true));
+        let hits = engine
+            .search(
+                "guide runbook",
+                Some(search_options(&["body", "title"], "all")),
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched_fields, ["body", "title"]);
     }
 
     fn assert_invalid(error: EngineError) {

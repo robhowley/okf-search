@@ -48,11 +48,6 @@ Type, tag, status, trust-tier, and conformance values are exact and
 case-sensitive. Values within one filter array are alternatives (OR); filter
 properties are combined with AND. Empty filter arrays impose no restriction.
 
-The final query term also gets prefix matching when it has at least three
-characters. For example, `"rollback proce"` can match `procedure`; earlier
-terms are never prefixes, and a one- or two-character final term is not a
-prefix. This prefix behavior remains enabled when fuzzy matching is `false`.
-
 ### Staleness filter details
 
 `stale: true` selects classified documents whose `staleAfter` is at or before
@@ -61,14 +56,31 @@ prefix. This prefix behavior remains enabled when fuzzy matching is `false`.
 Unclassified degraded documents match neither staleness branch.
 
 
-### Fuzzy edit-distance details
+### Matching and scoring
 
-With fuzzy matching enabled, the backend adds edit-distance candidates. A
-numeric `fuzzy` value is a ratio: the allowed distance is rounded from
-`termLength * ratio` and clamped to one or two edits. `fuzzy: false` and
-`fuzzy: 0` disable those edit-distance candidates but do not disable final-term
-prefix matching. When fuzzy matching is enabled, the final-term prefix query
-uses the same edit distance.
+| Match | Weight | Example |
+| --- | ---: | --- |
+| Exact word | 1.00 | `search` → `search` |
+| Literal prefix | 0.50 | `sear` → `search` |
+| Whole-word typo | 0.25 | `serch` → `search` |
+| Prefix with a typo | 0.10 | `tantv` → `tantivy` |
+
+- Prefixes apply only to the last query word, with at least three characters (Unicode scalar values).
+- `fuzzy: false` or `0` disables typo matching, not literal prefixes.
+- Typo allowance: `clamp(round(wordLength × ratio), 1, 2)` edits; swapping adjacent characters costs one edit. The first character may change too.
+- Each indexed spelling uses the first matching row above; alternative spellings compete rather than add.
+
+```text
+for each selected field:
+  words = sum over query words(max(weight × BM25(matching spelling)))
+  phrase = Tantivy phrase score if 2+ query words occur consecutively, in order
+           within this field, without typo correction or prefix completion; otherwise 0
+  score += fieldBoost × (words + 1.50 × phrase)
+```
+
+The phrase bonus changes ranking, not eligibility: `match` and filters still
+apply. Filters add no score; `matchedFields` reports word matches, even without
+a phrase match.
 
 
 ### Results
