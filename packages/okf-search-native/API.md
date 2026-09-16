@@ -48,14 +48,6 @@ Type, tag, status, trust-tier, and conformance values are exact and
 case-sensitive. Values within one filter array are alternatives (OR); filter
 properties are combined with AND. Empty filter arrays impose no restriction.
 
-The final query term also gets literal prefix matching when it has at least
-three Unicode scalar values. For example, `"rollback proce"` can match
-`procedure`; earlier terms are never prefixes, and a one- or two-scalar-value
-final term is not a prefix. This literal-prefix behavior remains enabled when
-fuzzy matching is `false`. When fuzzy matching is enabled, the same final term
-also gets fuzzy-prefix matching, so a term such as `"tantv"` can match
-`tantivy` when an indexed prefix is within the allowed edit distance.
-
 ### Staleness filter details
 
 `stale: true` selects classified documents whose `staleAfter` is at or before
@@ -64,37 +56,31 @@ also gets fuzzy-prefix matching, so a term such as `"tantv"` can match
 Unclassified degraded documents match neither staleness branch.
 
 
-### Fuzzy and prefix matching details
+### Matching and scoring
 
-With fuzzy matching enabled, the backend adds whole-word and final-term
-fuzzy-prefix edit-distance candidates. A numeric `fuzzy` value is a ratio: the
-allowed distance is rounded from `termLength * ratio` and clamped to one or two
-edits. `fuzzy: false` and `fuzzy: 0` disable both edit-distance candidate
-classes but do not disable final-term literal prefix matching. Only the final
-query term, when it has at least three Unicode scalar values, gets either
-prefix expansion; literal expansion uses dictionary terms that start with the
-term, while fuzzy-prefix expansion allows the indexed term's prefix to be
-within the edit distance. Fuzzy expansion compares the full analyzed token, so
-initial-character substitutions and leading transpositions are eligible when
-within the allowed distance. Interior transpositions still cost one edit.
-Distance is measured on the full token, not a stripped suffix.
+| Match | Weight | Example |
+| --- | ---: | --- |
+| Exact word | 1.00 | `search` → `search` |
+| Literal prefix | 0.50 | `sear` → `search` |
+| Whole-word typo | 0.25 | `serch` → `search` |
+| Prefix with a typo | 0.10 | `tantv` → `tantivy` |
 
-Candidates use BM25 term scores with soft weights: exact `1.00`, literal prefix
-`0.50`, whole-word fuzzy `0.25`, and fuzzy-prefix-only `0.10`. Exact terms take
-precedence over all alternatives, literal prefixes over fuzzy alternatives,
-and whole-word fuzzy over fuzzy-prefix matches.
-Each spelling occurs once per query term and field; disjunction-max prevents
-alternative spellings from adding their scores, while field boosts and matches
-for other query terms still contribute.
+- Prefixes apply only to the last query word, with at least three characters (Unicode scalar values).
+- `fuzzy: false` or `0` disables typo matching, not literal prefixes.
+- Typo allowance: `clamp(round(wordLength × ratio), 1, 2)` edits; swapping adjacent characters costs one edit. The first character may change too.
+- Each indexed spelling uses the first matching row above; alternative spellings compete rather than add.
 
-Multi-token queries also receive an optional, additive exact-phrase bonus:
-`1.50 × field boost × Tantivy phrase score` for each selected field containing
-all analyzed query tokens in order at consecutive positions. The bonus does
-not use prefix or fuzzy matches and never crosses fields. Single-token queries
-receive no phrase bonus. The existing word query remains required, so the
-bonus changes neither `match: "any"` / `"all"` eligibility nor metadata filters;
-filters remain score-neutral. `matchedFields` still reports word matches,
-including fields without a complete phrase.
+```text
+for each selected field:
+  words = sum over query words(max(weight × BM25(matching spelling)))
+  phrase = Tantivy phrase score if 2+ query words occur consecutively, in order
+           within this field, without typo correction or prefix completion; otherwise 0
+  score += fieldBoost × (words + 1.50 × phrase)
+```
+
+The phrase bonus changes ranking, not eligibility: `match` and filters still
+apply. Filters add no score; `matchedFields` reports word matches, even without
+a phrase match.
 
 
 ### Results
