@@ -854,6 +854,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "fs4",
+ "levenshtein_automata",
  "libc",
  "napi",
  "napi-build",
@@ -864,6 +865,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tantivy",
+ "tantivy-fst",
  "tempfile",
  "thiserror",
  "zstd",

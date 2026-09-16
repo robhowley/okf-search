@@ -48,10 +48,13 @@ Type, tag, status, trust-tier, and conformance values are exact and
 case-sensitive. Values within one filter array are alternatives (OR); filter
 properties are combined with AND. Empty filter arrays impose no restriction.
 
-The final query term also gets prefix matching when it has at least three
-characters. For example, `"rollback proce"` can match `procedure`; earlier
-terms are never prefixes, and a one- or two-character final term is not a
-prefix. This prefix behavior remains enabled when fuzzy matching is `false`.
+The final query term also gets literal prefix matching when it has at least
+three Unicode scalar values. For example, `"rollback proce"` can match
+`procedure`; earlier terms are never prefixes, and a one- or two-scalar-value
+final term is not a prefix. This literal-prefix behavior remains enabled when
+fuzzy matching is `false`. When fuzzy matching is enabled, the same final term
+also gets fuzzy-prefix matching, so a term such as `"tantv"` can match
+`tantivy` when an indexed prefix is within the allowed edit distance.
 
 ### Staleness filter details
 
@@ -61,14 +64,37 @@ prefix. This prefix behavior remains enabled when fuzzy matching is `false`.
 Unclassified degraded documents match neither staleness branch.
 
 
-### Fuzzy edit-distance details
+### Fuzzy and prefix matching details
 
-With fuzzy matching enabled, the backend adds edit-distance candidates. A
-numeric `fuzzy` value is a ratio: the allowed distance is rounded from
-`termLength * ratio` and clamped to one or two edits. `fuzzy: false` and
-`fuzzy: 0` disable those edit-distance candidates but do not disable final-term
-prefix matching. When fuzzy matching is enabled, the final-term prefix query
-uses the same edit distance.
+With fuzzy matching enabled, the backend adds whole-word and final-term
+fuzzy-prefix edit-distance candidates. A numeric `fuzzy` value is a ratio: the
+allowed distance is rounded from `termLength * ratio` and clamped to one or two
+edits. `fuzzy: false` and `fuzzy: 0` disable both edit-distance candidate
+classes but do not disable final-term literal prefix matching. Only the final
+query term, when it has at least three Unicode scalar values, gets either
+prefix expansion; literal expansion uses dictionary terms that start with the
+term, while fuzzy-prefix expansion allows the indexed term's prefix to be
+within the edit distance. Fuzzy expansion compares the full analyzed token, so
+initial-character substitutions and leading transpositions are eligible when
+within the allowed distance. Interior transpositions still cost one edit.
+Distance is measured on the full token, not a stripped suffix.
+
+Candidates use BM25 term scores with soft weights: exact `1.00`, literal prefix
+`0.50`, whole-word fuzzy `0.25`, and fuzzy-prefix-only `0.10`. Exact terms take
+precedence over all alternatives, literal prefixes over fuzzy alternatives,
+and whole-word fuzzy over fuzzy-prefix matches.
+Each spelling occurs once per query term and field; disjunction-max prevents
+alternative spellings from adding their scores, while field boosts and matches
+for other query terms still contribute.
+
+Multi-token queries also receive an optional, additive exact-phrase bonus:
+`1.50 × field boost × Tantivy phrase score` for each selected field containing
+all analyzed query tokens in order at consecutive positions. The bonus does
+not use prefix or fuzzy matches and never crosses fields. Single-token queries
+receive no phrase bonus. The existing word query remains required, so the
+bonus changes neither `match: "any"` / `"all"` eligibility nor metadata filters;
+filters remain score-neutral. `matchedFields` still reports word matches,
+including fields without a complete phrase.
 
 
 ### Results
