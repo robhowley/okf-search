@@ -8,10 +8,14 @@ use napi::{Env, bindgen_prelude::Utf16String};
 use preparation::{PreparationError, PreparedEntry};
 use raw_api::{decode, identity, ingest_result, invalid, preparation_error, prepare, snapshot};
 
+#[cfg(test)]
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound;
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
+use levenshtein_automata::{DFA, Distance, LevenshteinAutomatonBuilder};
 use napi::bindgen_prelude::{
     Either, FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion, KeyFilter,
     Object, Unknown, ValueType,
@@ -29,7 +33,7 @@ use tantivy::schema::{
     FAST, Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument,
     TextFieldIndexing, TextOptions, Value,
 };
-use tantivy::tokenizer::{LowerCaser, SimpleTokenizer, TextAnalyzer, TokenStream};
+use tantivy::tokenizer::{LowerCaser, MAX_TOKEN_LEN, SimpleTokenizer, TextAnalyzer, TokenStream};
 use tantivy::{
     DocAddress, DocSet, Index, IndexReader, IndexSettings, IndexWriter, ReloadPolicy, Score, Term,
 };
@@ -42,6 +46,10 @@ const FETCH_FLOOR: usize = 32;
 const DEFAULT_SNIPPET_LENGTH: usize = 240;
 const SNIPPET_LOOKBEHIND: usize = 80;
 const MAX_SAFE_INTEGER: u128 = 9_007_199_254_740_991;
+const TRANSPOSITION_COST_ONE: bool = true;
+
+static DISTANCE_ONE_BUILDER: OnceLock<LevenshteinAutomatonBuilder> = OnceLock::new();
+static DISTANCE_TWO_BUILDER: OnceLock<LevenshteinAutomatonBuilder> = OnceLock::new();
 
 #[napi(object)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -709,6 +717,157 @@ fn fuzzy_distance(term: &str, ratio: f64) -> u8 {
     ((term.chars().count() as f64 * ratio).round() as u8).clamp(1, 2)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TermMatchOptions {
+    distance: u8,
+    prefix: bool,
+}
+
+fn term_match_options(text: &str, ratio: f64, final_term: bool) -> TermMatchOptions {
+    TermMatchOptions {
+        distance: fuzzy_distance(text, ratio),
+        prefix: final_term && text.chars().count() >= 3,
+    }
+}
+
+fn fuzzy_builder(distance: u8) -> &'static LevenshteinAutomatonBuilder {
+    match distance {
+        1 => DISTANCE_ONE_BUILDER
+            .get_or_init(|| LevenshteinAutomatonBuilder::new(1, TRANSPOSITION_COST_ONE)),
+        2 => DISTANCE_TWO_BUILDER
+            .get_or_init(|| LevenshteinAutomatonBuilder::new(2, TRANSPOSITION_COST_ONE)),
+        _ => panic!("unsupported fuzzy distance {distance}"),
+    }
+}
+
+enum SnippetTerm<'a> {
+    Exact(&'a str),
+    Prefix(&'a str),
+    Fuzzy(DFA),
+}
+
+impl SnippetTerm<'_> {
+    fn accepts(&self, token: &str) -> bool {
+        match self {
+            Self::Exact(term) => token == *term,
+            Self::Prefix(term) => token.starts_with(term),
+            Self::Fuzzy(dfa) => matches!(dfa.eval(token.as_bytes()), Distance::Exact(_)),
+        }
+    }
+}
+
+fn build_snippet_terms<F>(plan: &QueryPlan, mut on_dfa_build: F) -> Vec<SnippetTerm<'_>>
+where
+    F: FnMut(),
+{
+    if plan.terms.is_empty() {
+        return Vec::new();
+    }
+    let final_index = plan.terms.len() - 1;
+    plan.terms
+        .iter()
+        .enumerate()
+        .map(|(index, term)| {
+            let options = term_match_options(term, plan.options.fuzzy_ratio, index == final_index);
+            match (options.distance, options.prefix) {
+                (0, false) => SnippetTerm::Exact(term),
+                (0, true) => SnippetTerm::Prefix(term),
+                (distance, false) => {
+                    on_dfa_build();
+                    SnippetTerm::Fuzzy(fuzzy_builder(distance).build_dfa(term))
+                }
+                (distance, true) => {
+                    on_dfa_build();
+                    SnippetTerm::Fuzzy(fuzzy_builder(distance).build_prefix_dfa(term))
+                }
+            }
+        })
+        .collect()
+}
+
+fn snippet_terms(plan: &QueryPlan) -> Vec<SnippetTerm<'_>> {
+    build_snippet_terms(plan, || {})
+}
+
+fn scan_snippet_anchor<F, G>(
+    text: &str,
+    terms: &[SnippetTerm<'_>],
+    mut on_token: F,
+    mut on_matcher_evaluation: G,
+) -> Option<usize>
+where
+    F: FnMut(),
+    G: FnMut(),
+{
+    if terms.is_empty() {
+        return None;
+    }
+    let mut text_analyzer = analyzer();
+    let mut stream = text_analyzer.token_stream(text);
+    while stream.advance() {
+        on_token();
+        let token = stream.token();
+        if token.text.len() > MAX_TOKEN_LEN {
+            continue;
+        }
+        if terms.iter().any(|term| {
+            on_matcher_evaluation();
+            term.accepts(&token.text)
+        }) {
+            return Some(token.offset_from);
+        }
+    }
+    None
+}
+
+fn snippet_anchor(text: &str, terms: &[SnippetTerm<'_>]) -> Option<usize> {
+    scan_snippet_anchor(text, terms, || {}, || {})
+}
+
+#[cfg(test)]
+fn reset_snippet_work() {
+    SNIPPET_WORK.with(|work| *work.borrow_mut() = SnippetWorkCounters::default());
+}
+
+#[cfg(test)]
+fn snippet_work() -> SnippetWorkCounters {
+    SNIPPET_WORK.with(|work| work.borrow().clone())
+}
+
+#[cfg(test)]
+fn snippet_terms_counted(plan: &QueryPlan) -> Vec<SnippetTerm<'_>> {
+    let mut dfa_builds = 0;
+    let terms = build_snippet_terms(plan, || dfa_builds += 1);
+    SNIPPET_WORK.with(|work| {
+        let mut work = work.borrow_mut();
+        work.preparations += 1;
+        work.dfa_builds += dfa_builds;
+    });
+    terms
+}
+
+#[cfg(test)]
+fn snippet_anchor_counted(identity: &str, text: &str, terms: &[SnippetTerm<'_>]) -> Option<usize> {
+    let mut token_visits = 0;
+    let mut matcher_evaluations = 0;
+    let anchor = scan_snippet_anchor(
+        text,
+        terms,
+        || token_visits += 1,
+        || matcher_evaluations += 1,
+    );
+    if !terms.is_empty() {
+        SNIPPET_WORK.with(|work| {
+            let mut work = work.borrow_mut();
+            work.body_scans += 1;
+            work.scanned_sections.push(identity.to_owned());
+            work.token_visits += token_visits;
+            work.matcher_evaluations += matcher_evaluations;
+        });
+    }
+    anchor
+}
+
 // The actual branch builder is kept separate so the string is available for
 // the fuzzy ratio → discrete edit-distance mapping.
 fn field_term_query_text(
@@ -724,17 +883,25 @@ fn field_term_query_text(
         term.clone(),
         IndexRecordOption::WithFreqs,
     ))];
-    let distance = fuzzy_distance(text, plan.options.fuzzy_ratio);
+    let options = term_match_options(text, plan.options.fuzzy_ratio, final_term);
 
-    if distance > 0 {
+    if options.distance > 0 {
         alternatives.push(Box::new(BoostQuery::new(
-            Box::new(FuzzyTermQuery::new(term.clone(), distance, true)),
+            Box::new(FuzzyTermQuery::new(
+                term.clone(),
+                options.distance,
+                TRANSPOSITION_COST_ONE,
+            )),
             0.70,
         )));
     }
-    if final_term && text.chars().count() >= 3 {
+    if options.prefix {
         alternatives.push(Box::new(BoostQuery::new(
-            Box::new(FuzzyTermQuery::new_prefix(term, distance, true)),
+            Box::new(FuzzyTermQuery::new_prefix(
+                term,
+                options.distance,
+                TRANSPOSITION_COST_ONE,
+            )),
             0.50,
         )));
     }
@@ -953,6 +1120,24 @@ struct Record {
 struct Candidate {
     score: Score,
     record: Record,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct SnippetWorkCounters {
+    preparations: usize,
+    dfa_builds: usize,
+    body_scans: usize,
+    scanned_sections: Vec<String>,
+    token_visits: usize,
+    matcher_evaluations: usize,
+    matched_field_probes: usize,
+    matched_field_probe_identities: Vec<(String, String)>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static SNIPPET_WORK: RefCell<SnippetWorkCounters> = RefCell::new(SnippetWorkCounters::default());
 }
 
 struct Engine {
@@ -1319,10 +1504,27 @@ impl Engine {
             fetch = next;
         };
 
-        match selected
+        let selected = selected
             .into_iter()
             .take(plan.options.limit)
-            .map(|candidate| to_hit(&searcher, &self.fields, &plan, candidate))
+            .collect::<Vec<_>>();
+        let snippet_terms =
+            if selected.is_empty() || !plan.options.fields.contains(&SearchField::Body) {
+                Vec::new()
+            } else {
+                #[cfg(test)]
+                {
+                    snippet_terms_counted(&plan)
+                }
+                #[cfg(not(test))]
+                {
+                    snippet_terms(&plan)
+                }
+            };
+
+        match selected
+            .into_iter()
+            .map(|candidate| to_hit(&searcher, &self.fields, &plan, &snippet_terms, candidate))
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(hits) => Ok(hits),
@@ -1670,15 +1872,8 @@ fn end_for_utf16_budget(text: &str, start: usize, budget: usize) -> usize {
     end
 }
 
-fn make_snippet(text: &str, terms: &[String], max_length: usize) -> String {
-    // ASCII lowercasing keeps byte offsets aligned with the original string. For
-    // non-ASCII case folding we deliberately fall back to a leading snippet.
-    let lower = text.to_ascii_lowercase();
-    let first_match = terms
-        .iter()
-        .filter_map(|term| lower.find(&term.to_ascii_lowercase()))
-        .min();
-    let start = first_match.map_or(0, |position| snippet_start(text, position));
+fn make_snippet(text: &str, anchor: Option<usize>, max_length: usize) -> String {
+    let start = anchor.map_or(0, |position| snippet_start(text, position));
     let end = end_for_utf16_budget(text, start, max_length);
     let mut snippet = String::new();
     if start > 0 {
@@ -1696,12 +1891,23 @@ fn matched_fields(
     fields: &Fields,
     plan: &QueryPlan,
     address: DocAddress,
+    section_id: &str,
 ) -> Vec<String> {
+    #[cfg(not(test))]
+    let _ = section_id;
+
     plan.options
         .fields
         .iter()
         .copied()
         .filter(|field| {
+            #[cfg(test)]
+            SNIPPET_WORK.with(|work| {
+                let mut work = work.borrow_mut();
+                work.matched_field_probes += 1;
+                work.matched_field_probe_identities
+                    .push((section_id.to_owned(), field.name().to_owned()));
+            });
             let probe = field_probe(plan, fields, *field);
             query_matches_address(searcher, probe.as_ref(), address)
         })
@@ -1729,10 +1935,21 @@ fn to_hit(
     searcher: &tantivy::Searcher,
     fields: &Fields,
     plan: &QueryPlan,
+    snippet_terms: &[SnippetTerm<'_>],
     candidate: Candidate,
 ) -> Result<SearchHit, EngineError> {
     let record = candidate.record;
-    let matched_fields = matched_fields(searcher, fields, plan, record.address);
+    let matched_fields = matched_fields(searcher, fields, plan, record.address, &record.section_id);
+    let anchor = {
+        #[cfg(test)]
+        {
+            snippet_anchor_counted(&record.section_id, &record.text, snippet_terms)
+        }
+        #[cfg(not(test))]
+        {
+            snippet_anchor(&record.text, snippet_terms)
+        }
+    };
     Ok(SearchHit {
         document_id: record.document_id,
         title: record.title,
@@ -1744,7 +1961,7 @@ fn to_hit(
         path: record.path,
         start_line: record.start_line,
         end_line: record.end_line,
-        snippet: make_snippet(&record.text, &plan.terms, plan.options.snippet_length),
+        snippet: make_snippet(&record.text, anchor, plan.options.snippet_length),
     })
 }
 
@@ -2633,6 +2850,583 @@ mod tests {
         }
     }
 
+    fn snippet_plan(query: &str, ratio: f64, fields: &[&str], match_mode: &str) -> QueryPlan {
+        let mut options = search_options(fields, match_mode);
+        options.fuzzy = Some(Either::B(ratio));
+        QueryPlan {
+            terms: tokenize(query),
+            options: resolve_options(Some(options)).expect("valid snippet options"),
+        }
+    }
+
+    fn raw_fuzzy_accepts(candidate: &str, query: &str, distance: u8, prefix: bool) -> bool {
+        let mut schema_builder = Schema::builder();
+        let field = schema_builder.add_text_field("candidate", STRING);
+        let index = Index::create_in_ram(schema_builder.build());
+        let mut writer = index.writer(15_000_000).expect("raw parity writer");
+        let mut doc = TantivyDocument::default();
+        doc.add_text(field, candidate);
+        writer.add_document(doc).expect("raw parity document");
+        writer.commit().expect("raw parity commit");
+
+        let term = Term::from_field_text(field, query);
+        let query = if prefix {
+            FuzzyTermQuery::new_prefix(term, distance, TRANSPOSITION_COST_ONE)
+        } else {
+            FuzzyTermQuery::new(term, distance, TRANSPOSITION_COST_ONE)
+        };
+        index
+            .reader()
+            .expect("raw parity reader")
+            .searcher()
+            .search(&query, &Count)
+            .expect("raw parity search")
+            == 1
+    }
+
+    fn analyzed_token_info(text: &str) -> Vec<(String, usize, usize)> {
+        let mut text_analyzer = analyzer();
+        let mut stream = text_analyzer.token_stream(text);
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            let token = stream.token();
+            tokens.push((token.text.clone(), token.offset_from, token.offset_to));
+        }
+        tokens
+    }
+
+    fn alphanumeric_token_with_byte_len(length: usize) -> String {
+        assert!(length >= 3);
+        let mut token = String::from("ret");
+        while token.len() + "é".len() <= length {
+            token.push('é');
+        }
+        while token.len() < length {
+            token.push('a');
+        }
+        assert_eq!(token.len(), length);
+        token
+    }
+
+    fn ascii_token_with_byte_len(length: usize) -> String {
+        assert!(length >= 3);
+        format!("ret{}", "a".repeat(length - 3))
+    }
+
+    #[test]
+    fn term_match_policy_and_production_dfas_match_fuzzy_term_query() {
+        assert_eq!(fuzzy_distance("éé", 0.2), 1);
+        assert_eq!(fuzzy_distance("retrieval", 0.1), 1);
+        assert_eq!(fuzzy_distance("retrieval", 0.2), 2);
+        assert_eq!(fuzzy_distance("retrieval", 1.0), 2);
+        assert_eq!(
+            term_match_options("ab", 0.2, true),
+            TermMatchOptions {
+                distance: 1,
+                prefix: false,
+            }
+        );
+        assert_eq!(
+            term_match_options("abc", 0.0, true),
+            TermMatchOptions {
+                distance: 0,
+                prefix: true,
+            }
+        );
+        assert_eq!(
+            term_match_options("abc", 0.2, false),
+            TermMatchOptions {
+                distance: 1,
+                prefix: false,
+            }
+        );
+
+        let cases = [
+            ("retrieval", "retrieval", 0.0, false, true),
+            ("retrieval", "retrieva", 0.1, false, true),
+            ("retrieval", "retrievals", 0.1, false, true),
+            ("retrieval", "rexrieval", 0.1, false, true),
+            ("retrieval", "rertieval", 0.1, false, true),
+            ("retrieval", "xetrieval", 0.1, false, true),
+            ("retrieval", "retrievalextra", 0.2, false, false),
+            ("retrieval", "retrievalextra", 0.0, true, true),
+            ("retrieval", "rexrievalextra", 0.1, true, true),
+            ("retrieval", "xretrievalextra", 0.2, true, true),
+            ("café", "cafe", 0.1, false, true),
+            ("naïve", "naive", 0.1, false, true),
+            ("東京語", "東京語駅", 0.0, true, true),
+        ];
+
+        for (query, candidate, ratio, prefix, expected) in cases {
+            let query_text = if prefix {
+                query.to_owned()
+            } else {
+                format!("{query} guard")
+            };
+            let plan = snippet_plan(&query_text, ratio, &["body"], "any");
+            let terms = snippet_terms(&plan);
+            let options = term_match_options(&plan.terms[0], ratio, prefix);
+            assert_eq!(options.prefix, prefix, "policy prefix for {query}");
+            assert_eq!(terms[0].accepts(candidate), expected, "helper {query:?}");
+            assert_eq!(
+                raw_fuzzy_accepts(candidate, query, options.distance, prefix),
+                expected,
+                "engine {query:?} against {candidate:?}"
+            );
+        }
+
+        for candidate in ["retrieval", "retrieva", "retrievals", "rexrieval"] {
+            let whole = raw_fuzzy_accepts(candidate, "retrieval", 1, false);
+            let prefix = raw_fuzzy_accepts(candidate, "retrieval", 1, true);
+            assert!(
+                !whole || prefix,
+                "whole match must be a prefix match: {candidate}"
+            );
+        }
+    }
+
+    #[test]
+    fn snippet_anchors_follow_analyzer_offsets_and_selection_rules() {
+        let introduction = "intro ".repeat(40);
+        let body = format!("{introduction}retrieval");
+        let fuzzy_plan = snippet_plan("rexrieval", 0.1, &["body"], "any");
+        let fuzzy_terms = snippet_terms(&fuzzy_plan);
+        assert_eq!(
+            snippet_anchor(&body, &fuzzy_terms),
+            Some(body.find("retrieval").expect("retrieval offset"))
+        );
+        let exact_plan = snippet_plan("rexrieval", 0.0, &["body"], "any");
+        assert_eq!(snippet_anchor(&body, &snippet_terms(&exact_plan)), None);
+
+        let engine =
+            Engine::new(vec![document(strict_section("late", &body))]).expect("late fuzzy engine");
+        let mut fuzzy_off = search_options(&["body"], "any");
+        fuzzy_off.fuzzy = Some(Either::A(false));
+        assert!(
+            engine
+                .search("rexrieval", Some(fuzzy_off))
+                .expect("fuzzy-off search")
+                .is_empty()
+        );
+        let mut fuzzy_on = search_options(&["body"], "any");
+        fuzzy_on.fuzzy = Some(Either::B(0.1));
+        let hit = engine
+            .search("rexrieval", Some(fuzzy_on))
+            .expect("fuzzy-on search")
+            .pop()
+            .expect("fuzzy hit");
+        assert!(hit.snippet.contains("retrieval"));
+
+        let earlier_fuzzy = format!("{introduction}rexrieval then retrieval");
+        assert_eq!(
+            snippet_anchor(&earlier_fuzzy, &fuzzy_terms),
+            Some(earlier_fuzzy.find("rexrieval").expect("typo offset"))
+        );
+        let fuzzy_before_exact_plan = snippet_plan("retrieval", 0.1, &["body"], "any");
+        assert_eq!(
+            snippet_anchor(&earlier_fuzzy, &snippet_terms(&fuzzy_before_exact_plan),),
+            Some(
+                earlier_fuzzy
+                    .find("rexrieval")
+                    .expect("earlier fuzzy offset")
+            )
+        );
+
+        let prefix_body = format!("{introduction}apropos profile");
+        let prefix_plan = snippet_plan("pro", 0.0, &["body"], "any");
+        assert_eq!(
+            snippet_anchor(&prefix_body, &snippet_terms(&prefix_plan)),
+            Some(prefix_body.find("profile").expect("profile offset"))
+        );
+
+        let multi_term_body = format!("{introduction}alpha middle beta");
+        for match_mode in ["any", "all"] {
+            let plan = snippet_plan("beta alpha", 0.0, &["body"], match_mode);
+            assert_eq!(
+                snippet_anchor(&multi_term_body, &snippet_terms(&plan)),
+                Some(multi_term_body.find("alpha").expect("alpha offset")),
+                "{match_mode} should use the earliest eligible body token"
+            );
+        }
+        let multi_engine = Engine::new(vec![document(strict_section("multi", &multi_term_body))])
+            .expect("multi-term engine");
+        for match_mode in ["any", "all"] {
+            let hits = multi_engine
+                .search("beta alpha", Some(search_options(&["body"], match_mode)))
+                .expect("multi-term search");
+            assert_eq!(hits.len(), 1, "{match_mode} hit");
+            assert!(hits[0].snippet.contains("alpha"));
+        }
+
+        let mut cross_field = document(strict_section("cross-field-anchor", &body));
+        cross_field.title = "titlealpha".to_owned();
+        let cross_field_engine = Engine::new(vec![cross_field]).expect("cross-field engine");
+        let mut cross_field_options = search_options(&["title", "body"], "all");
+        cross_field_options.fuzzy = Some(Either::B(0.1));
+        let cross_field_hit = cross_field_engine
+            .search("titlealpha rexrieval", Some(cross_field_options))
+            .expect("cross-field search")
+            .pop()
+            .expect("cross-field hit");
+        assert!(cross_field_hit.snippet.contains("retrieval"));
+
+        let mut metadata_only = document(strict_section(
+            "metadata-only-anchor",
+            &format!("{introduction}body content only"),
+        ));
+        metadata_only.title = "needle".to_owned();
+        let metadata_engine = Engine::new(vec![metadata_only]).expect("metadata-only engine");
+        let metadata_hit = metadata_engine
+            .search("needle", Some(search_options(&["title", "body"], "any")))
+            .expect("metadata-only search")
+            .pop()
+            .expect("metadata-only hit");
+        assert!(!metadata_hit.snippet.contains("needle"));
+
+        let mut body_excluded = document(strict_section(
+            "body-excluded-anchor",
+            &format!("{introduction}needle"),
+        ));
+        body_excluded.title = "needle".to_owned();
+        let excluded_engine = Engine::new(vec![body_excluded]).expect("excluded-body engine");
+        let excluded_hit = excluded_engine
+            .search("needle", Some(search_options(&["title"], "any")))
+            .expect("excluded-body search")
+            .pop()
+            .expect("excluded-body hit");
+        assert!(!excluded_hit.snippet.contains("needle"));
+
+        let unicode = "😀中 İ Σ naïve e\u{301} 東京 retrieval";
+        let tokens = analyzed_token_info(unicode);
+        let i_offset = unicode.find('İ').expect("capital dotted I");
+        let sigma_offset = unicode.find('Σ').expect("capital sigma");
+        let accent_offset = unicode.find("naïve").expect("accented token");
+        let combining_offset = unicode.find("e\u{301}").expect("combining-mark token");
+        let cjk_offset = unicode.find("東京").expect("CJK token");
+        assert!(tokens.iter().any(|(text, from, to)| {
+            text == "i\u{307}" && *from == i_offset && *to == i_offset + "İ".len()
+        }));
+        assert!(tokens.iter().any(|(text, from, to)| {
+            text == "σ" && *from == sigma_offset && *to == sigma_offset + "Σ".len()
+        }));
+        assert!(tokens.iter().any(|(text, from, to)| {
+            text == "naïve" && *from == accent_offset && *to == accent_offset + "naïve".len()
+        }));
+        assert!(tokens.iter().any(|(text, from, to)| {
+            text == "e" && *from == combining_offset && *to == combining_offset + 1
+        }));
+        assert!(tokens.iter().any(|(text, from, to)| {
+            text == "東京" && *from == cjk_offset && *to == cjk_offset + "東京".len()
+        }));
+        for (query, offset) in [
+            ("İ", i_offset),
+            ("σ", sigma_offset),
+            ("naïve", accent_offset),
+            ("東京", cjk_offset),
+        ] {
+            let plan = snippet_plan(query, 0.0, &["body"], "any");
+            assert_eq!(
+                snippet_anchor(unicode, &snippet_terms(&plan)),
+                Some(offset),
+                "Unicode anchor for {query}"
+            );
+        }
+        let unicode_plan = snippet_plan("retrieval", 0.0, &["body"], "any");
+        assert_eq!(
+            snippet_anchor(unicode, &snippet_terms(&unicode_plan)),
+            Some(unicode.find("retrieval").expect("unicode retrieval offset"))
+        );
+    }
+
+    #[test]
+    fn max_token_len_matches_indexing_and_skips_before_all_matchers() {
+        let limit = MAX_TOKEN_LEN;
+        let cases = vec![
+            ("ascii-below", ascii_token_with_byte_len(limit - 1), true),
+            ("ascii-at", ascii_token_with_byte_len(limit), true),
+            ("ascii-above", ascii_token_with_byte_len(limit + 1), false),
+            (
+                "unicode-below",
+                alphanumeric_token_with_byte_len(limit - 1),
+                true,
+            ),
+            ("unicode-at", alphanumeric_token_with_byte_len(limit), true),
+            (
+                "unicode-above",
+                alphanumeric_token_with_byte_len(limit + 1),
+                false,
+            ),
+            (
+                "lowercase-at",
+                format!("ret{}İ", "a".repeat(limit - 6)),
+                true,
+            ),
+            (
+                "lowercase-above",
+                format!("ret{}İ", "a".repeat(limit - 5)),
+                false,
+            ),
+        ];
+        for (name, body, expected) in &cases {
+            let tokens = analyzed_token_info(body);
+            assert_eq!(tokens.len(), 1, "{name} token count");
+            let normalized_len = tokens[0].0.len();
+            if name.starts_with("lowercase-at") {
+                assert_eq!(normalized_len, limit, "{name} normalized length");
+            } else if name.starts_with("lowercase-above") {
+                assert_eq!(normalized_len, limit + 1, "{name} normalized length");
+            } else {
+                assert_eq!(normalized_len, body.len(), "{name} normalized length");
+            }
+            assert_eq!(tokens[0].1, 0, "{name} source offset_from");
+            assert_eq!(tokens[0].2, body.len(), "{name} source offset_to");
+
+            let engine = Engine::new(vec![document(strict_section(name, body))])
+                .expect("MAX_TOKEN_LEN engine");
+            let mut options = search_options(&["body"], "any");
+            options.fuzzy = Some(Either::A(false));
+            let hits = engine
+                .search("ret", Some(options))
+                .expect("MAX_TOKEN_LEN search");
+            assert_eq!(hits.len() == 1, *expected, "{name} retrieval acceptance");
+            if *expected {
+                assert!(hits[0].snippet.starts_with("ret"), "{name} anchor");
+            }
+        }
+
+        let introduction = "introduction ".repeat(35);
+        let families = [
+            ("ascii", ascii_token_with_byte_len(limit + 1)),
+            ("multibyte", alphanumeric_token_with_byte_len(limit + 1)),
+            (
+                "lowercase-expansion",
+                format!("ret{}İ", "a".repeat(limit - 5)),
+            ),
+        ];
+        let mut metadata_documents = Vec::new();
+        let mut metadata_bodies = Vec::new();
+        for (family, oversized) in families {
+            let no_later_id = format!("oversized-{family}-no-later");
+            let later_id = format!("oversized-{family}-later");
+            let no_later_body = format!("{introduction}{oversized}");
+            let later_body = format!("{introduction}{oversized} retrieval");
+
+            let mut no_later = document(strict_section(&no_later_id, &no_later_body));
+            no_later.title = "ret".to_owned();
+            let mut later = document(strict_section(&later_id, &later_body));
+            later.title = "ret".to_owned();
+            metadata_documents.extend([no_later, later]);
+            metadata_bodies.push((no_later_id, no_later_body, later_id, later_body));
+        }
+
+        let engine = Engine::new(metadata_documents).expect("oversized metadata engine");
+        let mut options = search_options(&["title", "body"], "any");
+        options.fuzzy = Some(Either::A(false));
+        options.snippet_length = Some(DEFAULT_SNIPPET_LENGTH as f64);
+        reset_snippet_work();
+        let hits = engine
+            .search("ret", Some(options))
+            .expect("oversized metadata search");
+        assert_eq!(hits.len(), metadata_bodies.len() * 2);
+        for (no_later_id, no_later_body, later_id, later_body) in &metadata_bodies {
+            let no_later_hit = hits
+                .iter()
+                .find(|hit| hit.document_id == *no_later_id)
+                .expect("no-later hit");
+            assert_eq!(no_later_hit.matched_fields, vec!["title".to_owned()]);
+            assert_eq!(
+                no_later_hit.snippet,
+                make_snippet(no_later_body, None, DEFAULT_SNIPPET_LENGTH),
+                "{no_later_id} must use leading fallback"
+            );
+
+            let later_hit = hits
+                .iter()
+                .find(|hit| hit.document_id == *later_id)
+                .expect("later hit");
+            assert_eq!(
+                later_hit.matched_fields,
+                vec!["title".to_owned(), "body".to_owned()]
+            );
+            let later_anchor = later_body
+                .find("retrieval")
+                .expect("later retrieval offset");
+            assert_eq!(
+                later_hit.snippet,
+                make_snippet(later_body, Some(later_anchor), DEFAULT_SNIPPET_LENGTH,),
+                "{later_id} must skip oversized token and use later anchor"
+            );
+            assert!(later_hit.snippet.contains("retrieval"));
+        }
+        let work = snippet_work();
+        let expected_sections: BTreeSet<_> = metadata_bodies
+            .iter()
+            .flat_map(|(no_later_id, _, later_id, _)| {
+                [format!("{no_later_id}#root"), format!("{later_id}#root")]
+            })
+            .collect();
+        assert_eq!(work.body_scans, expected_sections.len());
+        assert_eq!(
+            work.scanned_sections
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            expected_sections
+        );
+        let expected_probes: BTreeSet<_> = expected_sections
+            .iter()
+            .flat_map(|section_id| {
+                [
+                    (section_id.clone(), "title".to_owned()),
+                    (section_id.clone(), "body".to_owned()),
+                ]
+            })
+            .collect();
+        assert_eq!(work.matched_field_probes, expected_probes.len());
+        assert_eq!(
+            work.matched_field_probe_identities
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            expected_probes
+        );
+
+        let oversized_for_guard = ascii_token_with_byte_len(limit + 1);
+        for query in ["ret", "ret guard"] {
+            let plan = snippet_plan(query, 0.2, &["body"], "any");
+            reset_snippet_work();
+            assert_eq!(
+                snippet_anchor_counted("oversized", &oversized_for_guard, &snippet_terms(&plan),),
+                None
+            );
+            let work = snippet_work();
+            assert_eq!(work.body_scans, 1, "{query} scan count");
+            assert_eq!(work.scanned_sections, vec!["oversized".to_owned()]);
+            assert_eq!(work.token_visits, 1, "{query} token count");
+            assert_eq!(work.matcher_evaluations, 0, "{query} guard before matcher");
+        }
+    }
+
+    #[test]
+    fn snippet_work_is_once_per_search_and_only_final_hits_are_scanned() {
+        reset_snippet_work();
+        let engine = Engine::new(vec![
+            document(strict_section("first-snippet", "needle first")),
+            document(strict_section("second-snippet", "needle second")),
+        ])
+        .expect("snippet work engine");
+        let mut options = search_options(&["title", "body"], "any");
+        options.limit = Some(2.0);
+        options.fuzzy = Some(Either::B(0.2));
+        let hits = engine
+            .search("needle", Some(options))
+            .expect("snippet work search");
+        assert_eq!(hits.len(), 2);
+        let work = snippet_work();
+        assert_eq!(work.preparations, 1);
+        assert_eq!(work.dfa_builds, 1);
+        assert_eq!(work.body_scans, hits.len());
+        assert_eq!(
+            work.scanned_sections,
+            hits.iter()
+                .map(|hit| hit.section_id.clone())
+                .collect::<Vec<_>>()
+        );
+        let mut expected_probe_identities = Vec::new();
+        for hit in &hits {
+            for field in ["title", "body"] {
+                expected_probe_identities.push((hit.section_id.clone(), field.to_owned()));
+            }
+        }
+        assert_eq!(work.matched_field_probes, expected_probe_identities.len());
+        assert_eq!(
+            work.matched_field_probe_identities, expected_probe_identities,
+            "each selected section keeps one probe per requested field"
+        );
+        assert!(work.token_visits >= hits.len());
+        assert!(work.matcher_evaluations >= hits.len());
+
+        reset_snippet_work();
+        let mut collapsed = document(strict_section("collapsed", "needle retained"));
+        let mut discarded = section("collapsed", "needle retained");
+        discarded.section_id = "collapsed#zz-discarded".to_owned();
+        collapsed.sections.push(discarded);
+        let collapsed_engine = Engine::new(vec![collapsed]).expect("collapsed work engine");
+        let mut collapsed_options = search_options(&["title", "body"], "any");
+        collapsed_options.limit = Some(1.0);
+        collapsed_options.fuzzy = Some(Either::B(0.2));
+        let collapsed_hits = collapsed_engine
+            .search("needle", Some(collapsed_options))
+            .expect("collapsed work search");
+        assert_eq!(collapsed_hits.len(), 1);
+        assert_eq!(collapsed_hits[0].section_id, "collapsed#root");
+        let work = snippet_work();
+        assert_eq!(work.preparations, 1);
+        assert_eq!(work.dfa_builds, 1);
+        assert_eq!(work.body_scans, 1);
+        assert_eq!(work.scanned_sections, vec!["collapsed#root".to_owned()]);
+        assert_eq!(work.matched_field_probes, 2);
+        assert_eq!(
+            work.matched_field_probe_identities,
+            vec![
+                ("collapsed#root".to_owned(), "title".to_owned()),
+                ("collapsed#root".to_owned(), "body".to_owned()),
+            ]
+        );
+
+        reset_snippet_work();
+        let mut body_excluded = search_options(&["title"], "any");
+        body_excluded.fuzzy = Some(Either::B(0.2));
+        let body_excluded_hits = engine
+            .search("Memory", Some(body_excluded))
+            .expect("body-excluded work search");
+        assert_eq!(body_excluded_hits.len(), 2);
+        let work = snippet_work();
+        assert_eq!(work.preparations, 0);
+        assert_eq!(work.dfa_builds, 0);
+        assert_eq!(work.body_scans, 0);
+        assert_eq!(work.scanned_sections, Vec::<String>::new());
+        assert_eq!(work.token_visits, 0);
+        assert_eq!(work.matcher_evaluations, 0);
+        assert_eq!(work.matched_field_probes, 2);
+        assert_eq!(
+            work.matched_field_probe_identities
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                ("first-snippet#root".to_owned(), "title".to_owned()),
+                ("second-snippet#root".to_owned(), "title".to_owned()),
+            ])
+        );
+
+        reset_snippet_work();
+        let mut no_hit = search_options(&["body"], "any");
+        no_hit.fuzzy = Some(Either::A(false));
+        assert!(
+            engine
+                .search("missing", Some(no_hit))
+                .expect("no-hit work search")
+                .is_empty()
+        );
+        assert_eq!(snippet_work(), SnippetWorkCounters::default());
+    }
+
+    #[test]
+    fn snippet_formatting_uses_explicit_anchor_without_changing_utf16_budget() {
+        let text = format!("{}retrieval{}", "x".repeat(90), "y".repeat(200));
+        let anchor = text.find("retrieval").expect("retrieval anchor");
+        let tiny = make_snippet(&text, Some(anchor), 4);
+        assert_eq!(tiny, format!("…{}…", "x".repeat(4)));
+        assert!(!tiny.contains("retrieval"));
+
+        assert_eq!(
+            make_snippet("prefix needle suffix", Some(7), 13),
+            "prefix needle…"
+        );
+        assert_eq!(make_snippet("prefix text", None, 4), "pref…");
+    }
+
     fn assert_invalid(error: EngineError) {
         assert!(
             error
@@ -3293,18 +4087,14 @@ mod tests {
 
     #[test]
     fn snippets_keep_ascii_windows_and_ellipsis_outside_budget() {
-        let terms = vec!["needle".to_owned()];
         assert_eq!(
-            make_snippet("prefix needle suffix", &terms, 13),
+            make_snippet("prefix needle suffix", Some(7), 13),
             "prefix needle…"
         );
-        assert_eq!(
-            make_snippet("prefix text", &["missing".to_owned()], 4),
-            "pref…"
-        );
+        assert_eq!(make_snippet("prefix text", None, 4), "pref…");
 
         let text = format!("{}needle{}", "x".repeat(90), "y".repeat(200));
-        let snippet = make_snippet(&text, &terms, 100);
+        let snippet = make_snippet(&text, Some(90), 100);
         assert!(snippet.starts_with('…'));
         assert!(snippet.ends_with('…'));
         let window = snippet
@@ -3330,15 +4120,14 @@ mod tests {
     #[test]
     fn snippets_count_cjk_as_utf16_units() {
         let text = format!("{}tail", "中".repeat(300));
-        let without_match = Vec::new();
-        let default = make_snippet(&text, &without_match, 240);
+        let default = make_snippet(&text, None, 240);
         assert_eq!(
             default.strip_suffix('…').expect("truncated CJK snippet"),
             "中".repeat(240)
         );
         assert_eq!(default.len(), 240 * 3 + "…".len());
         assert_eq!(
-            make_snippet(&text, &without_match, 80)
+            make_snippet(&text, None, 80)
                 .strip_suffix('…')
                 .expect("short CJK snippet"),
             "中".repeat(80)
@@ -3347,21 +4136,21 @@ mod tests {
 
     #[test]
     fn snippets_count_emoji_as_two_units_without_splitting_scalars() {
-        assert_eq!(make_snippet("a😀z", &[], 1), "a…");
-        assert_eq!(make_snippet("😀a😀z", &[], 3), "😀a…");
-        assert_eq!(make_snippet("ab😀z", &[], 3), "ab…");
+        assert_eq!(make_snippet("a😀z", None, 1), "a…");
+        assert_eq!(make_snippet("😀a😀z", None, 3), "😀a…");
+        assert_eq!(make_snippet("ab😀z", None, 3), "ab…");
     }
 
     #[test]
     fn snippets_count_combining_marks_as_separate_units() {
-        assert_eq!(make_snippet("e\u{301}x", &[], 1), "e…");
-        assert_eq!(make_snippet("e\u{301}x", &[], 2), "e\u{301}…");
+        assert_eq!(make_snippet("e\u{301}x", None, 1), "e…");
+        assert_eq!(make_snippet("e\u{301}x", None, 2), "e\u{301}…");
     }
 
     #[test]
     fn snippets_keep_ascii_matches_after_non_ascii_lookbehind() {
         let text = format!("{}needle{}", "中".repeat(100), "x".repeat(200));
-        let snippet = make_snippet(&text, &["needle".to_owned()], 240);
+        let snippet = make_snippet(&text, Some("中".repeat(100).len()), 240);
 
         assert_eq!(
             snippet,

@@ -336,6 +336,80 @@ test("prepared search validates snippetLength without truncation", () => {
   }
 });
 
+test("prepared snippets use fuzzy, prefix, Unicode, and body-field anchors", () => {
+  const { NativeOkfSearch } = require("okf-search-native/prepared");
+  const fuzzyBody = `${"introduction ".repeat(20)} retrievel ${"filler ".repeat(60)} retrieval`;
+  const prefixBody = `${"introduction ".repeat(20)} apropos ${"filler ".repeat(50)} profile`;
+  const unicodeBody = `${"中".repeat(100)} İstanbul 😀 retrieval ${"z".repeat(250)}`;
+  const excludedBody = `${"leading ".repeat(80)} excludedneedle`;
+  const excluded = preparedDocument("prepared-body-excluded", excludedBody);
+  excluded.title = "excludedneedle";
+
+  const index = NativeOkfSearch.fromPrepared([
+    preparedDocument("prepared-fuzzy-anchor", fuzzyBody),
+    preparedDocument("prepared-prefix-anchor", prefixBody),
+    preparedDocument("prepared-unicode-anchor", unicodeBody),
+    excluded,
+  ]);
+
+  const fuzzy = index.search("rexrieval", {
+    fields: ["body"],
+    fuzzy: 0.2,
+    snippetLength: 240,
+  }).find((hit) => hit.documentId === "prepared-fuzzy-anchor");
+  assert.ok(fuzzy);
+  assert.match(fuzzy.snippet, /retrievel/);
+  assert.doesNotMatch(fuzzy.snippet, /retrieval/);
+  assert.deepEqual(index.search("rexrieval", {
+    fields: ["body"],
+    fuzzy: false,
+  }), []);
+  assert.deepEqual(index.search("rexrieval", {
+    fields: ["body"],
+    fuzzy: 0,
+  }), []);
+
+  const prefix = index.search("pro", {
+    fields: ["body"],
+    fuzzy: false,
+    snippetLength: 240,
+  }).find((hit) => hit.documentId === "prepared-prefix-anchor");
+  assert.ok(prefix);
+  assert.match(prefix.snippet, /profile/);
+  assert.doesNotMatch(prefix.snippet, /apropos/);
+  assert.deepEqual(index.search("pr", {
+    fields: ["body"],
+    fuzzy: false,
+  }), []);
+
+  const unicode = index.search("rexrieval", {
+    fields: ["body"],
+    fuzzy: 0.2,
+    snippetLength: 240,
+  }).find((hit) => hit.documentId === "prepared-unicode-anchor");
+  assert.equal(
+    unicode?.snippet,
+    `…${"中".repeat(67)} İstanbul 😀 retrieval ${"z".repeat(150)}…`,
+  );
+
+  const bodyExcluded = index.search("excludedneedle", {
+    fields: ["title"],
+    snippetLength: 32,
+  }).find((hit) => hit.documentId === "prepared-body-excluded");
+  assert.ok(bodyExcluded);
+  assert.match(bodyExcluded.snippet, /^leading/);
+  assert.doesNotMatch(bodyExcluded.snippet, /excludedneedle/);
+
+  const tiny = index.search("rexrieval", {
+    fields: ["body"],
+    fuzzy: 0.2,
+    snippetLength: 16,
+  }).find((hit) => hit.documentId === "prepared-fuzzy-anchor");
+  assert.ok(tiny);
+  assert.doesNotMatch(tiny.snippet, /retrievel/);
+  assert.ok(tiny.snippet.replaceAll("…", "").length <= 16);
+});
+
 test("prepared search option getters can reenter read-only native inventory", async () => {
   const document = preparedDocument("prepared-reentry", "prepared-reentry-marker");
   const script = `
