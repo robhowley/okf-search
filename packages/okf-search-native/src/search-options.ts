@@ -181,7 +181,7 @@ function validateMatch(
 
 function validateFields(
   value: unknown,
-): string[] | undefined {
+): PublicField[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -192,7 +192,7 @@ function validateFields(
     );
   }
 
-  const fields: string[] = [];
+  const fields: PublicField[] = [];
 
   for (let index = 0; index < value.length; index++) {
     if (!Object.hasOwn(value, index)) {
@@ -212,7 +212,7 @@ function validateFields(
       );
     }
 
-    fields.push(field);
+    fields.push(field as PublicField);
   }
 
   return fields;
