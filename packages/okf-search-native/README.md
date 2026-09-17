@@ -225,57 +225,42 @@ console.log(index.listDegradedDocuments());
 
 ## Performance benchmarks
 
-On a sample OKF bundle of 13,692 Markdown documents (59.57 MiB
-of source text), native opened about **10.8× faster** and used **70% less
-post-open resident memory** in this benchmark.
+Measured on 13,692 Markdown documents (59.57 MiB of source text), using the public
+`openOkf` and `search` APIs.
 
-| Metric | [okf-minisearch][benchmark-minisearch] | [okf-search-native][benchmark-native] | % Reduction |
-| --- | ---: | ---: | ---: |
-| Median `openOkf` time | 21.65 s | 2.00 s | 90.8% |
-| Warm query p50 | 10.93 ms | 1.40 ms | 87.2% |
-| Warm query p95 | 86.93 ms | 2.44 ms | 97.2% |
-| Reported index storage¹ | 200.37 MiB | 81.31 MiB | — |
-| Median post-open RSS | 1,880 MiB | 558 MiB | 70.3% |
+### Default search options
 
-¹ MiniSearch: serialized JSON bytes. Native: in-memory Tantivy index-file bytes.
-These measure different representations, not equivalent RAM usage; RSS measures
-total process memory.
+Fuzzy matching is disabled by default; final-term prefix matching remains enabled.
 
-[benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/830b9bfb3882cb965b57119d03d2ebcd1f38885a/packages/okf-minisearch/package.json
-[benchmark-native]: https://github.com/robhowley/okf-search/blob/830b9bfb3882cb965b57119d03d2ebcd1f38885a/packages/okf-search-native/package.json
+| Metric | [okf-minisearch][benchmark-minisearch] | [okf-search-native][benchmark-native] |
+| --- | ---: | ---: |
+| Median `openOkf` time | 20.40 s | 1.57 s |
+| Warm query p50 | 10.45 ms | 1.38 ms |
+| Warm query p95 | 86.81 ms | 2.38 ms |
+| Warm query p99 | 95.64 ms | 2.45 ms |
+| Reported index storage¹ | 200.37 MiB | 80.75 MiB |
+| Median post-open RSS | 2,235 MiB | 527 MiB |
 
-The native column is a committed branch candidate, not a published release. Its
-manifest version is 0.5.1 (MiniSearch: 2.3.0); the benchmarked candidate applies
-this branch's stored-field and compatibility changes relative to base revision
-`830b9bfb3882cb965b57119d03d2ebcd1f38885a`. MiniSearch was built from the base
-revision; native was built from this candidate in release mode.
+### Fuzzy matching enabled
 
-### Detailed results
+The same queries and defaults, changing only the search call to:
 
-Peak RSS medians were 2,930.55 MiB for MiniSearch and 638.87 MiB for native.
-MiniSearch's API-reported serialized-index size was 210,099,191 bytes (200.37
-MiB). Native's API-reported RamDirectory file-map size was 85,259,866 bytes
-(81.31 MiB). These storage measurements are backend-specific: native bytes are
-not total RSS or persisted disk size, and normal background merges can change
-the RamDirectory value after open.
+```ts
+index.search(query, { fuzzy: true });
+```
 
-- **Method:** ten balanced AB/BA pairs (20 fresh processes total), run sequentially;
-  five MiniSearch→native pairs and five native→MiniSearch pairs. Each process ran
-  the same nine default-option queries, with 30 warmups and 200 timed calls per
-  query. Open time excludes imports and query calls used the package-root public
-  `openOkf`/`search` APIs, not raw binding methods. Filesystem caches were warm and
-  uncontrolled.
-- **Aggregation:** open time, RSS, peak RSS, and storage are medians across ten
-  fresh processes per backend, with ranges retained in the benchmark report.
-  Query p50/p95 are pooled across 18,000 timed calls per backend, not medians of
-  process-level percentiles.
-- **Memory:** RSS covers the whole process, including native allocations. Post-open
-  samples follow the public `indexStats()` call and forced GC; peak includes startup,
-  opening, stats, and searches. MiniSearch's stats serialization can affect memory
-  and allocator retention.
-- **Limits:** one private corpus, not distributed here; no cold filesystem-cache
-  condition was established. Hit counts and public hit shapes were stable, but
-  result identity, ranking, and scores were not compared between backends.
+| Metric | [okf-minisearch][benchmark-minisearch] | [okf-search-native][benchmark-native] |
+| --- | ---: | ---: |
+| Warm query p50 | 14.36 ms | 7.96 ms |
+| Warm query p95 | 87.36 ms | 14.12 ms |
+| Warm query p99 | 96.71 ms | 15.00 ms |
+
+¹ MiniSearch reports serialized JSON bytes; native reports in-memory Tantivy
+index-file bytes. These are different storage representations, not equivalent RAM
+measurements. Native storage can vary with background merges.
+
+[benchmark-minisearch]: https://github.com/robhowley/okf-search/blob/31d5da38d9502a85101c670729ca1a9646ad3a32/packages/okf-minisearch/package.json
+[benchmark-native]: https://github.com/robhowley/okf-search/blob/c187a764b10682919805714faf51d54bf53eb133/packages/okf-search-native/package.json
 
 ## Reference and development
 

@@ -71,6 +71,19 @@ numeric `fuzzy` value is a ratio: the allowed distance is rounded from
 prefix matching. When fuzzy matching is enabled, the final-term prefix query
 uses the same edit distance.
 
+### Snippets
+
+`snippet` is an excerpt from the matching section, positioned near its first
+body-text match using the same fuzzy and prefix rules as search. It preserves
+the original text without highlighting: for example, a fuzzy query for
+`spectrogaph` can show `spectrograph` in the snippet.
+
+If `body` is excluded from `fields`, or no body text matches, the snippet comes
+from the beginning of the section.
+
+A snippet need not contain every query term, even with `match: "all"`. Very
+short `snippetLength` values can omit the matching word because the excerpt
+includes preceding context.
 
 ### Results
 

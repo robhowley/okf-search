@@ -17,6 +17,7 @@ chrono = "0.4"
 napi = { version = "3.12", default-features = false, features = ["napi8", "chrono_date", "dyn-symbols"] }
 napi-derive = "3"
 parking_lot = "0.12"
+levenshtein_automata = "=0.2.1"
 # Cache compatibility metadata deliberately supports this exact index implementation.
 tantivy = "=0.26.1"
 thiserror = "2"

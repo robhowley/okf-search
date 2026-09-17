@@ -251,6 +251,131 @@ describe("friendly search behavior", () => {
       .toHaveLength(1);
   });
 
+  it("anchors fuzzy snippets on analyzed body tokens and preserves token boundaries", () => {
+    const index = createOkfSearch([
+      {
+        path: "fuzzy-anchor.md",
+        markdown: concept(
+          "type: note",
+          `${"introduction ".repeat(20)} retrievel ${"filler ".repeat(60)} retrieval`,
+        ),
+      },
+      {
+        path: "prefix-anchor.md",
+        markdown: concept(
+          "type: note",
+          `${"introduction ".repeat(20)} apropos ${"filler ".repeat(50)} profile`,
+        ),
+      },
+    ]);
+
+    const fuzzy = index.search("rexrieval", {
+      fields: ["body"],
+      fuzzy: 0.2,
+      snippetLength: 240,
+    }).find((hit) => hit.documentId === "fuzzy-anchor");
+    expect(fuzzy).toBeDefined();
+    expect(fuzzy!.snippet).toContain("retrievel");
+    expect(fuzzy!.snippet).not.toContain("retrieval");
+    expect(index.search("rexrieval", {
+      fields: ["body"],
+      fuzzy: false,
+    })).toEqual([]);
+    expect(index.search("rexrieval", {
+      fields: ["body"],
+      fuzzy: 0,
+    })).toEqual([]);
+
+    const prefix = index.search("pro", {
+      fields: ["body"],
+      fuzzy: false,
+      snippetLength: 240,
+    }).find((hit) => hit.documentId === "prefix-anchor");
+    expect(prefix).toBeDefined();
+    expect(prefix!.snippet).toContain("profile");
+    expect(prefix!.snippet).not.toContain("apropos");
+    expect(index.search("pr", {
+      fields: ["body"],
+      fuzzy: false,
+    })).toEqual([]);
+  });
+
+  it("anchors across fields and uses original Unicode body offsets", () => {
+    const unicodeBody = `${"中".repeat(100)} İstanbul 😀 retrieval ${"z".repeat(250)}`;
+    const excludedBody = `${"leading ".repeat(80)} excludedneedle`;
+    const index = createOkfSearch([
+      {
+        path: "unicode-anchor.md",
+        markdown: concept("type: note", unicodeBody),
+      },
+      {
+        path: "cross-field.md",
+        markdown: concept(
+          "type: note\ntitle: titlealpha",
+          `${"introduction ".repeat(20)} retrieval`,
+        ),
+      },
+      {
+        path: "body-excluded.md",
+        markdown: concept("type: note\ntitle: excludedneedle", excludedBody),
+      },
+    ]);
+
+    const unicode = index.search("rexrieval", {
+      fields: ["body"],
+      fuzzy: 0.2,
+      snippetLength: 240,
+    }).find((hit) => hit.documentId === "unicode-anchor");
+    expect(unicode?.snippet).toBe(
+      `…${"中".repeat(67)} İstanbul 😀 retrieval ${"z".repeat(150)}…`,
+    );
+
+    for (const match of ["any", "all"] as const) {
+      const hit = index.search("titlealpha rexrieval", {
+        fields: ["title", "body"],
+        fuzzy: 0.2,
+        match,
+        snippetLength: 240,
+      }).find((candidate) => candidate.documentId === "cross-field");
+      expect(hit).toBeDefined();
+      expect(hit!.snippet).toContain("retrieval");
+      expect(hit!.matchedFields).toEqual(["title", "body"]);
+    }
+
+    const bodyExcluded = index.search("excludedneedle", {
+      fields: ["title"],
+      snippetLength: 32,
+    }).find((hit) => hit.documentId === "body-excluded");
+    expect(bodyExcluded).toBeDefined();
+    expect(bodyExcluded!.snippet).toMatch(/^leading/);
+    expect(bodyExcluded!.snippet).not.toContain("excludedneedle");
+  });
+
+  it("preserves the fixed lookbehind when a tiny budget hides a late anchor", () => {
+    const index = createOkfSearch([{
+      path: "tiny-anchor.md",
+      markdown: concept(
+        "type: note",
+        `${"lead ".repeat(30)} retrieval ${"tail ".repeat(20)}`,
+      ),
+    }]);
+
+    const wide = index.search("rexrieval", {
+      fields: ["body"],
+      fuzzy: 0.2,
+      snippetLength: 240,
+    })[0]!;
+    const tiny = index.search("rexrieval", {
+      fields: ["body"],
+      fuzzy: 0.2,
+      snippetLength: 16,
+    })[0]!;
+
+    expect(wide.snippet).toContain("retrieval");
+    expect(tiny.snippet).not.toContain("retrieval");
+    expect(tiny.snippet.replaceAll("…", "").length).toBeLessThanOrEqual(16);
+  });
+
   it("configures UTF-16 snippet windows without changing result ordering", () => {
     const longBody = `prefix snippetneedle ${"x".repeat(252)} larger-only`;
     const index = createOkfSearch([
