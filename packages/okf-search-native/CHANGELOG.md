@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.6.0...okf-search-native-v0.7.0) (2026-09-17)
+
+
+### Features
+
+* **okf-search-native:** allow configurable snippet length ([#95](https://github.com/robhowley/okf-search/issues/95)) ([897e01a](https://github.com/robhowley/okf-search/commit/897e01a98b57772d1e2bdc7d35d771fd9b9de257))
+
+
+### Bug Fixes
+
+* **okf-search-native:** anchor fuzzy snippets on analyzed tokens ([#98](https://github.com/robhowley/okf-search/issues/98)) ([c349408](https://github.com/robhowley/okf-search/commit/c349408c4357d456bfcbced823bb5f2b1a8475d9))
+* **okf-search-native:** count snippet length in UTF-16 units ([#97](https://github.com/robhowley/okf-search/issues/97)) ([31d5da3](https://github.com/robhowley/okf-search/commit/31d5da38d9502a85101c670729ca1a9646ad3a32))
+
 ## [0.6.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.5.1...okf-search-native-v0.6.0) (2026-09-15)
 
 
