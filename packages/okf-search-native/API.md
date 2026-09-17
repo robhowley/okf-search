@@ -71,27 +71,19 @@ numeric `fuzzy` value is a ratio: the allowed distance is rounded from
 prefix matching. When fuzzy matching is enabled, the final-term prefix query
 uses the same edit distance.
 
-### Snippet anchors
+### Snippets
 
-When `body` is included in `fields`, the snippet starts near the first body
-token accepted by any analyzed query term. Anchoring uses the same analyzer,
-case handling, fuzzy distance, and final-term prefix rules as search. Matching
-is token-based, so fuzzy-disabled `pro` does not match the inner text of
-`apropos`, but a final `pro` can match `profile`. For `match: "all"`, every
-term must still match across the selected fields, while the snippet anchor may
-be any accepted body term. If `body` is excluded, or no accepted body token
-exists, the snippet uses the leading body window. This includes metadata-only
-hits.
+`snippet` is an excerpt from the matching section, positioned near its first
+body-text match using the same fuzzy and prefix rules as search. It preserves
+the original text without highlighting: for example, a fuzzy query for
+`spectrogaph` can show `spectrograph` in the snippet.
 
-The anchor is found from the original body text and its UTF-8 offsets. Unicode
-case handling, combining marks, emoji, and other multibyte text before a match
-do not shift the returned slice. These offsets are internal; no offsets are
-added to `OkfSearchHit`.
+If `body` is excluded from `fields`, or no body text matches, the snippet comes
+from the beginning of the section.
 
-The existing 80 UTF-16-unit lookbehind is unchanged. A tiny `snippetLength` can
-therefore leave a late anchor, or even the matching token, outside the returned
-window. The body window still uses UTF-16 units, and leading or trailing
-ellipses are extra characters outside that budget.
+A snippet need not contain every query term, even with `match: "all"`. Very
+short `snippetLength` values can omit the matching word because the excerpt
+includes preceding context.
 
 ### Results
 
