@@ -94,7 +94,10 @@ pub struct PreparedDocument {
     pub stale_after_epoch: Option<f64>,
     #[napi(js_name = "stalenessClassified")]
     pub staleness_classified: bool,
-    #[napi(js_name = "trustTier", ts_type = "\"unverified\" | \"machine-confirmed\" | \"human-reviewed\"")]
+    #[napi(
+        js_name = "trustTier",
+        ts_type = "\"unverified\" | \"machine-confirmed\" | \"human-reviewed\""
+    )]
     pub trust_tier: Option<String>,
     pub resource: String,
     pub description: String,
@@ -111,7 +114,10 @@ pub struct SearchWhere {
     pub tags_any: Option<Vec<String>>,
     #[napi(ts_type = "Array<\"draft\" | \"stable\" | \"deprecated\">")]
     pub statuses: Option<Vec<String>>,
-    #[napi(js_name = "trustTiers", ts_type = "Array<\"unverified\" | \"machine-confirmed\" | \"human-reviewed\">")]
+    #[napi(
+        js_name = "trustTiers",
+        ts_type = "Array<\"unverified\" | \"machine-confirmed\" | \"human-reviewed\">"
+    )]
     pub trust_tiers: Option<Vec<String>>,
     pub stale: Option<bool>,
     #[napi(ts_type = "Array<\"strict\" | \"degraded\">")]
@@ -144,7 +150,9 @@ pub struct SearchOptions {
     pub as_of: Option<DateTime<Utc>>,
     #[napi(js_name = "match", ts_type = "\"any\" | \"all\"")]
     pub match_mode: Option<String>,
-    #[napi(ts_type = "Array<\"resource\" | \"title\" | \"heading\" | \"description\" | \"tags\" | \"type\" | \"sources\" | \"body\">")]
+    #[napi(
+        ts_type = "Array<\"resource\" | \"title\" | \"heading\" | \"description\" | \"tags\" | \"type\" | \"sources\" | \"body\">"
+    )]
     pub fields: Option<Vec<String>>,
     pub boost: Option<SearchBoost>,
     pub fuzzy: Option<Either<bool, f64>>,
@@ -161,7 +169,10 @@ pub struct SearchHit {
     pub score: f64,
     #[napi(ts_type = "\"strict\" | \"degraded\"")]
     pub conformance: String,
-    #[napi(js_name = "matchedFields", ts_type = "Array<\"resource\" | \"title\" | \"heading\" | \"description\" | \"tags\" | \"type\" | \"sources\" | \"body\">")]
+    #[napi(
+        js_name = "matchedFields",
+        ts_type = "Array<\"resource\" | \"title\" | \"heading\" | \"description\" | \"tags\" | \"type\" | \"sources\" | \"body\">"
+    )]
     pub matched_fields: Vec<String>,
     #[napi(js_name = "headingPath")]
     pub heading_path: String,
