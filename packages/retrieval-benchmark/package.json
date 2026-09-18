@@ -1,0 +1,12 @@
+{
+  "name": "retrieval-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate-queries": "node generate-queries.mjs",
+    "judge-results": "node judge-results.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1"
+  }
+}
