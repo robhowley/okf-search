@@ -105,6 +105,9 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos-deployment-target }}
         run: pnpm --dir packages/okf-search-native run build --target "${{ matrix.target }}" --use-napi-cross=${{ matrix.napi-cross }}
 
+      - name: Native typecheck
+        run: pnpm --dir packages/okf-search-native run typecheck
+
       - name: Verify Linux glibc floor
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: pnpm --dir packages/okf-search-native run verify:release-artifacts glibc "${{ matrix.artifact }}"

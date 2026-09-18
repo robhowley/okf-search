@@ -77,11 +77,17 @@ for (const [label, spec] of Object.entries(workflows)) {
   });
 }
 
-test("source CI runs the full native package suite on every target before upload", async () => {
+test("source CI typechecks and runs the full native package suite on every target before upload", async () => {
   const workflow = await parseWorkflow(workflows.source.path);
   const steps = workflow.jobs[workflows.source.job].steps;
+  const buildIndex = steps.findIndex(({ name }) => name === "Build native package");
+  const typecheckIndex = steps.findIndex(({ name }) => name === "Native typecheck");
   const index = steps.findIndex(({ name }) => name === "Full native package tests");
-  assert.ok(index >= 0);
+  assert.ok(buildIndex >= 0);
+  assert.ok(typecheckIndex > buildIndex);
+  assert.equal(steps[typecheckIndex].run, "pnpm --dir packages/okf-search-native run typecheck");
+  assert.equal(steps[typecheckIndex].env, undefined);
+  assert.ok(index > typecheckIndex);
   assert.equal(steps[index].run, "pnpm --dir packages/okf-search-native run test");
   assert.deepEqual(steps[index].env, {
     CARGO_BUILD_TARGET: "${{ matrix.target }}",
@@ -152,6 +158,8 @@ test("native package exposes one complete build boundary and portable facade tes
   ]);
   assert.equal(manifest.scripts.build, "node scripts/build.mjs --release");
   assert.equal(manifest.scripts["build:debug"], "node scripts/build.mjs");
+  assert.equal(manifest.scripts.typecheck, "pnpm run test:types");
+  assert.doesNotMatch(manifest.scripts.test, /test:types/);
   assert.doesNotMatch(manifest.scripts.test, /\*/);
   assert.match(manifest.scripts.test, /--no-file-parallelism/);
   for (const filename of [
