@@ -84,14 +84,14 @@ export interface PreparedDocument {
   documentId: string
   path: string
   type: string
-  conformance: string
+  conformance: "strict" | "degraded"
   diagnostics: Array<Diagnostic>
   title: string
   tags: Array<string>
-  status?: string
+  status?: "draft" | "stable" | "deprecated"
   staleAfterEpoch?: number
   stalenessClassified: boolean
-  trustTier?: string
+  trustTier?: "unverified" | "machine-confirmed" | "human-reviewed"
   resource: string
   description: string
   sourceText: string
@@ -123,8 +123,8 @@ export interface SearchHit {
   title: string
   sectionId: string
   score: number
-  conformance: string
-  matchedFields: Array<string>
+  conformance: "strict" | "degraded"
+  matchedFields: Array<"resource" | "title" | "heading" | "description" | "tags" | "type" | "sources" | "body">
   headingPath: string
   path: string
   startLine: number
@@ -137,8 +137,8 @@ export interface SearchOptions {
   snippetLength?: number
   where?: SearchWhere
   asOf?: Date
-  match?: string
-  fields?: Array<string>
+  match?: "any" | "all"
+  fields?: Array<"resource" | "title" | "heading" | "description" | "tags" | "type" | "sources" | "body">
   boost?: SearchBoost
   fuzzy?: boolean | number
 }
@@ -146,10 +146,10 @@ export interface SearchOptions {
 export interface SearchWhere {
   types?: Array<string>
   tagsAny?: Array<string>
-  statuses?: Array<string>
-  trustTiers?: Array<string>
+  statuses?: Array<"draft" | "stable" | "deprecated">
+  trustTiers?: Array<"unverified" | "machine-confirmed" | "human-reviewed">
   stale?: boolean
-  conformance?: Array<string>
+  conformance?: Array<"strict" | "degraded">
 }
 
 export interface Suggestion {

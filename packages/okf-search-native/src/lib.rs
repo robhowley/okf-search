@@ -83,16 +83,21 @@ pub struct PreparedDocument {
     pub path: String,
     #[napi(js_name = "type")]
     pub document_type: String,
+    #[napi(ts_type = "\"strict\" | \"degraded\"")]
     pub conformance: String,
     pub diagnostics: Vec<Diagnostic>,
     pub title: String,
     pub tags: Vec<String>,
+    #[napi(ts_type = "\"draft\" | \"stable\" | \"deprecated\"")]
     pub status: Option<String>,
     #[napi(js_name = "staleAfterEpoch")]
     pub stale_after_epoch: Option<f64>,
     #[napi(js_name = "stalenessClassified")]
     pub staleness_classified: bool,
-    #[napi(js_name = "trustTier")]
+    #[napi(
+        js_name = "trustTier",
+        ts_type = "\"unverified\" | \"machine-confirmed\" | \"human-reviewed\""
+    )]
     pub trust_tier: Option<String>,
     pub resource: String,
     pub description: String,
@@ -107,10 +112,15 @@ pub struct SearchWhere {
     pub types: Option<Vec<String>>,
     #[napi(js_name = "tagsAny")]
     pub tags_any: Option<Vec<String>>,
+    #[napi(ts_type = "Array<\"draft\" | \"stable\" | \"deprecated\">")]
     pub statuses: Option<Vec<String>>,
-    #[napi(js_name = "trustTiers")]
+    #[napi(
+        js_name = "trustTiers",
+        ts_type = "Array<\"unverified\" | \"machine-confirmed\" | \"human-reviewed\">"
+    )]
     pub trust_tiers: Option<Vec<String>>,
     pub stale: Option<bool>,
+    #[napi(ts_type = "Array<\"strict\" | \"degraded\">")]
     pub conformance: Option<Vec<String>>,
 }
 
@@ -138,8 +148,11 @@ pub struct SearchOptions {
     pub where_filter: Option<SearchWhere>,
     #[napi(js_name = "asOf")]
     pub as_of: Option<DateTime<Utc>>,
-    #[napi(js_name = "match")]
+    #[napi(js_name = "match", ts_type = "\"any\" | \"all\"")]
     pub match_mode: Option<String>,
+    #[napi(
+        ts_type = "Array<\"resource\" | \"title\" | \"heading\" | \"description\" | \"tags\" | \"type\" | \"sources\" | \"body\">"
+    )]
     pub fields: Option<Vec<String>>,
     pub boost: Option<SearchBoost>,
     pub fuzzy: Option<Either<bool, f64>>,
@@ -154,8 +167,12 @@ pub struct SearchHit {
     #[napi(js_name = "sectionId")]
     pub section_id: String,
     pub score: f64,
+    #[napi(ts_type = "\"strict\" | \"degraded\"")]
     pub conformance: String,
-    #[napi(js_name = "matchedFields")]
+    #[napi(
+        js_name = "matchedFields",
+        ts_type = "Array<\"resource\" | \"title\" | \"heading\" | \"description\" | \"tags\" | \"type\" | \"sources\" | \"body\">"
+    )]
     pub matched_fields: Vec<String>,
     #[napi(js_name = "headingPath")]
     pub heading_path: String,
