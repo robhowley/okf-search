@@ -6,6 +6,7 @@ Development requires Rust `1.88.0`:
 pnpm install
 pnpm --filter okf-search-native run build
 pnpm --filter okf-search-native run check:rust
+pnpm --filter okf-search-native run typecheck
 pnpm --filter okf-search-native run test
 ```
 
@@ -36,8 +37,9 @@ The package `test` command above covers persistence at three boundaries:
   publication, process death, filesystem aliases, and platform-specific
   replacement behavior.
 
-The native-artifact CI matrix runs the full `pnpm run test` suite on every
-supported OS artifact with `CARGO_BUILD_TARGET` set to that row's target. Rust
+The native-artifact CI matrix runs native typecheck and the full
+`pnpm run test` suite on every supported OS artifact with `CARGO_BUILD_TARGET`
+set to that row's target. Rust
 test helpers and the loaded addon therefore use the same architecture.
 
 Persistence writes one opaque cache payload plus a retained sibling lock file
