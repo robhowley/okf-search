@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.7.0...okf-search-native-v0.7.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **okf-search-native:** narrow prepared API option types ([#100](https://github.com/robhowley/okf-search/issues/100)) ([63254ce](https://github.com/robhowley/okf-search/commit/63254ce9e28070cb7eb886c6a7d83651243be857))
+* **okf-search-native:** separate type checking from tests ([#102](https://github.com/robhowley/okf-search/issues/102)) ([f966155](https://github.com/robhowley/okf-search/commit/f96615533d8322e580d6d88175a8d12b2e42b722))
+
 ## [0.7.0](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.6.0...okf-search-native-v0.7.0) (2026-09-17)
 
 
