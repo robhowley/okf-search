@@ -31,26 +31,40 @@ afterEach(async () => {
 });
 
 describe("openOkf", () => {
-  it("opens empty and nested directories through the raw-document path", async () => {
-    const empty = await directory({});
-    const emptyIndex = await openOkf(empty);
-    expect(emptyIndex.listTypes()).toEqual([]);
-    expect(emptyIndex.search("anything")).toEqual([]);
+  it.each(["memory", "mmap"] as const)(
+    "opens empty and nested directories through the raw-document path (%s)",
+    async (storage) => {
+      const empty = await directory({});
+      const emptyIndex = storage === "mmap"
+        ? await openOkf(empty, {
+            cachePath: join(empty, ".cache.okf"),
+            storage,
+          })
+        : await openOkf(empty, { storage });
+      expect(emptyIndex.listTypes()).toEqual([]);
+      expect(emptyIndex.search("anything")).toEqual([]);
 
-    const root = await directory({
-      "nested/guide.md": concept("guide", "directoryneedle"),
-      "index.md": "not a concept",
-      "nested/log.md": "not a concept",
-      "UPPER.MD": "not a concept",
-    });
-    const index = await openOkf(root);
-    expect(index.search("directoryneedle")).toEqual([
-      expect.objectContaining({
-        documentId: "nested/guide",
-        path: "nested/guide.md",
-      }),
-    ]);
-  });
+      const root = await directory({
+        "nested/guide.md": concept("guide", "directoryneedle"),
+        "index.md": "not a concept",
+        "nested/log.md": "not a concept",
+        "UPPER.MD": "not a concept",
+      });
+      const index = storage === "mmap"
+        ? await openOkf(root, {
+            cachePath: join(root, ".cache.okf"),
+            storage,
+          })
+        : await openOkf(root, { storage });
+      expect(index.search("directoryneedle")).toEqual([
+        expect.objectContaining({
+          documentId: "nested/guide",
+          path: "nested/guide.md",
+        }),
+      ]);
+      await Promise.all([emptyIndex.close(), index.close()]);
+    },
+  );
 
   it("reports the first normalized failure without exposing a partial handle", async () => {
     const root = await directory({
@@ -92,18 +106,25 @@ describe("openOkf", () => {
     expect((parseFailure as Error).message).not.toMatch(/PrepareError|napi|native/i);
   });
 
-  it("remove changes only committed index state, not source files", async () => {
-    const markdown = concept("note", "sourcefileneedle");
-    const root = await directory({ "nested/source.md": markdown });
-    const path = join(root, "nested/source.md");
-    const before = await readFile(path);
-    const index = await openOkf(root);
+  it.each(["memory", "mmap"] as const)(
+    "remove changes only committed index state, not source files (%s)",
+    async (storage) => {
+      const markdown = concept("note", "sourcefileneedle");
+      const root = await directory({ "nested/source.md": markdown });
+      const path = join(root, "nested/source.md");
+      const before = await readFile(path);
+      const options = storage === "mmap"
+        ? { cachePath: join(root, ".cache.okf"), storage }
+        : { storage };
+      const index = await openOkf(root, options);
 
-    expect(index.remove("./nested//source.md")).toBe(true);
-    expect(index.search("sourcefileneedle")).toEqual([]);
-    expect(await readFile(path)).toEqual(before);
+      expect(index.remove("./nested//source.md")).toBe(true);
+      expect(index.search("sourcefileneedle")).toEqual([]);
+      expect(await readFile(path)).toEqual(before);
 
-    const reopened = await openOkf(root);
-    expect(reopened.search("sourcefileneedle")).toHaveLength(1);
-  });
+      const reopened = await openOkf(root, options);
+      expect(reopened.search("sourcefileneedle")).toHaveLength(1);
+      await Promise.all([index.close(), reopened.close()]);
+    },
+  );
 });

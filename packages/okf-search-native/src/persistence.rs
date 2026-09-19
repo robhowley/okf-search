@@ -434,6 +434,7 @@ thread_local! {
     pub(super) static PUBLICATION_FAILURE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
 }
 
+#[cfg(test)]
 pub(super) fn load(path: &str) -> Result<Option<Engine>> {
     load_with_storage(path, StorageMode::Memory)
 }

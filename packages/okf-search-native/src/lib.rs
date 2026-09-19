@@ -254,7 +254,7 @@ pub struct LogicalIndexStats {
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct IndexStorageStats {
-    #[napi(ts_type = "\"in-memory-index-files\"")]
+    #[napi(ts_type = "\"in-memory-index-files\" | \"mapped-index-files\"")]
     pub kind: String,
     #[napi(js_name = "sizeInBytes")]
     pub size_in_bytes: f64,
@@ -1090,6 +1090,8 @@ enum EngineError {
     Poisoned(String),
     #[error("[ERR_OKF_NATIVE] {0}")]
     UnsafeInteger(String),
+    #[error("[ERR_OKF_READ] {path}: {cause}")]
+    StorageRead { path: String, cause: String },
     #[error("[ERR_OKF_NATIVE] {0}")]
     Tantivy(#[from] tantivy::TantivyError),
 }
@@ -1477,6 +1479,16 @@ impl Engine {
         let mut machine_confirmed = 0usize;
         let mut human_reviewed = 0usize;
         let mut trust_unclassified = 0usize;
+        let size_in_bytes = self
+            .storage
+            .size()
+            .map_err(|error| EngineError::StorageRead {
+                path: self
+                    .storage
+                    .context_path()
+                    .map_or_else(|| "<index>".to_owned(), |path| path.display().to_string()),
+                cause: error.to_string(),
+            })?;
 
         for state in self.documents.values() {
             match state.conformance.as_str() {
@@ -1550,10 +1562,7 @@ impl Engine {
                     IndexStorage::Mmap { .. } => "mapped-index-files",
                 }
                 .to_owned(),
-                size_in_bytes: usize_to_js_number(
-                    self.storage.size().map_err(tantivy::TantivyError::from)?,
-                    "index file bytes",
-                )?,
+                size_in_bytes: usize_to_js_number(size_in_bytes, "index file bytes")?,
             },
         })
     }
@@ -2118,6 +2127,7 @@ fn native_error(error: EngineError) -> Error {
         EngineError::StoredInvariant(_)
         | EngineError::Poisoned(_)
         | EngineError::UnsafeInteger(_)
+        | EngineError::StorageRead { .. }
         | EngineError::Tantivy(_)
         | EngineError::Initialization { .. } => Status::GenericFailure,
     };
@@ -2176,8 +2186,18 @@ impl NativeOkfSearch {
     }
 
     #[napi(js_name = "indexStats")]
-    pub fn index_stats(&self) -> Result<IndexStats, Error> {
-        self.inner.admit()?.index_stats().map_err(native_error)
+    pub fn index_stats(&self, env: Env) -> Result<IndexStats, Error> {
+        self.inner
+            .admit()?
+            .index_stats()
+            .map_err(|error| match error {
+                EngineError::StorageRead { path, cause } => {
+                    let mut error = raw_api::invalid("ERR_OKF_READ", &path, None);
+                    error.cause = Some(Box::new(std::io::Error::other(cause)));
+                    raw_api::preparation_error(&env, error)
+                }
+                error => native_error(error),
+            })
     }
 
     #[napi(js_name = "listTypes")]
@@ -2219,8 +2239,11 @@ impl NativeOkfSearch {
     pub fn open_raw(
         root: Utf16String,
         cache_path: Option<Utf16String>,
+        #[napi(ts_arg_type = "\"memory\" | \"mmap\" | undefined | null")] storage: Option<
+            Utf16String,
+        >,
     ) -> napi::bindgen_prelude::AsyncTask<raw_api::OpenTask> {
-        raw_api::open_raw(root, cache_path)
+        raw_api::open_raw(root, cache_path, storage)
     }
 
     #[napi(ts_return_type = "Promise<void>")]

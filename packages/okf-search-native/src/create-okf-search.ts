@@ -207,7 +207,7 @@ function copyIndexStats(stats: NativeIndexStats): OkfIndexStats {
     }),
   });
   const storage: OkfIndexStorageStats = Object.freeze({
-    kind: "in-memory-index-files" as const,
+    kind: stats.storage.kind,
     sizeInBytes: stats.storage.sizeInBytes,
   });
 

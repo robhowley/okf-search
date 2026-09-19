@@ -168,6 +168,7 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
       error.code === "ERR_OKF_UNSUPPORTED" &&
       error.path === "autoSuggest",
   );
+  await index.close();
 
   const prepared = cjsPrepared.NativeOkfSearch.fromPrepared([
     preparedDocument("prepared", "prepared-runtime-marker"),
@@ -187,6 +188,12 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
   assert.deepEqual(prepared.search("prepared-ingest-marker", { match: "all" }), []);
   assert.equal(prepared.removeDocument("prepared-added"), false);
   assert.equal(prepared.removeDocument("missing"), false);
+  await prepared.close();
+  assert.throws(
+    () => prepared.indexStats(),
+    error => error instanceof Error &&
+      error.message.startsWith("[ERR_OKF_INDEX_CLOSED]"),
+  );
 
   const directoryRoot = await mkdtemp(join(tmpdir(), "okf-search-native-package-api-"));
   try {
@@ -215,8 +222,47 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
       directoryIndex.search("friendly-directory-marker", { match: "all" }),
       [],
     );
+    await directoryIndex.close();
   } finally {
     await rm(directoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("public storage modes select mmap, reject invalid options, and do not fall back", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-storage-api-"));
+  const root = join(workspace, "source");
+  const cachePath = join(workspace, "cache", "index.okf");
+  try {
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "source.md"), markdown("note", "storage-api-marker"));
+    const { openOkf, OkfError } = require("okf-search-native");
+    const mapped = await openOkf(root, { cachePath, storage: "mmap" });
+    assert.equal(mapped.indexStats().storage.kind, "mapped-index-files");
+    assert.ok(mapped.indexStats().storage.sizeInBytes > 0);
+    assert.equal(mapped.search("storage-api-marker").length, 1);
+    await mapped.close();
+
+    await assert.rejects(
+      openOkf(root, { storage: "mmap" }),
+      error => error instanceof OkfError &&
+        error.code === "ERR_OKF_FIELD" &&
+        error.path === "<input>" &&
+        error.field === "cachePath",
+    );
+
+    const { NativeOkfSearch } = require("okf-search-native/prepared");
+    await assert.rejects(
+      NativeOkfSearch.openRaw(root, undefined, "mmap"),
+      error => error && error.code === "ERR_OKF_FIELD" &&
+        error.path === "<input>" && error.field === "cachePath",
+    );
+    await assert.rejects(
+      NativeOkfSearch.openRaw(root, cachePath, "disk"),
+      error => error && error.code === "ERR_OKF_FIELD" &&
+        error.path === "<input>" && error.field === "storage",
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 

@@ -1,7 +1,12 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   createOkfSearch,
+  openOkf,
   validateOkfDocument,
 } from "../src/index.js";
 import type { OkfSearchOptions } from "../src/index.js";
@@ -66,6 +71,30 @@ describe("validateOkfDocument", () => {
 });
 
 describe("friendly search behavior", () => {
+  it("uses mapped storage for root opens and rejects work after close", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "okf-native-root-contract-"));
+    const root = join(directory, "source");
+    const cachePath = join(directory, "cache", "index.okf");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "mapped.md"), concept("type: note", "mapped-marker"));
+
+    try {
+      const index = await openOkf(root, { cachePath, storage: "mmap" });
+      expect(index.search("mapped-marker")).toHaveLength(1);
+      expect(index.indexStats().storage).toMatchObject({
+        kind: "mapped-index-files",
+      });
+      expect(index.indexStats().storage.sizeInBytes).toBeGreaterThan(0);
+
+      await index.close();
+      expect(() => index.indexStats()).toThrowError(expect.objectContaining({
+        code: "ERR_OKF_INDEX_CLOSED",
+      }));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("reports one logical document per state with every stats family", () => {
     const index = createOkfSearch([
       {

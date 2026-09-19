@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, io, path::Path, sync::Arc};
 use tantivy::directory::{Directory, MmapDirectory, RamDirectory};
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)] // Selected publicly in a later phase.
 pub(super) enum StorageMode {
     Memory,
     Mmap,
@@ -64,28 +63,40 @@ impl IndexStorage {
         match self {
             Self::Memory(d) => Ok(d.total_mem_usage()),
             Self::Mmap { workspace, .. } => {
-                let mut size = 0;
+                let mut size: usize = 0;
                 let context = |e: io::Error| {
                     io::Error::new(e.kind(), format!("{}: {e}", workspace.as_path().display()))
                 };
                 for entry in std::fs::read_dir(workspace.as_path()).map_err(context)? {
                     let entry = entry.map_err(context)?;
-                    let metadata = match std::fs::symlink_metadata(entry.path()) {
+                    let path = entry.path();
+                    let metadata = match std::fs::symlink_metadata(&path) {
                         Ok(metadata) => metadata,
                         Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
                         Err(e) => {
                             return Err(io::Error::new(
                                 e.kind(),
-                                format!("{}: {e}", entry.path().display()),
+                                format!("{}: {e}", path.display()),
                             ));
                         }
                     };
                     if metadata.is_file() {
-                        size += metadata.len() as usize;
+                        size = size.checked_add(metadata.len() as usize).ok_or_else(|| {
+                            io::Error::other(format!(
+                                "{}: sampled file size overflow",
+                                path.display()
+                            ))
+                        })?;
                     }
                 }
                 Ok(size)
             }
+        }
+    }
+    pub(super) fn context_path(&self) -> Option<&Path> {
+        match self {
+            Self::Memory(_) => None,
+            Self::Mmap { workspace, .. } => Some(workspace.as_path()),
         }
     }
 }

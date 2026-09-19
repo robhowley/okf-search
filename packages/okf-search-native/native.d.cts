@@ -17,7 +17,7 @@ export declare class NativeOkfSearch {
    */
   autoSuggest(query: string, options?: SearchOptions | undefined | null): Array<Suggestion>
   static validateRaw(input: object): unknown
-  static openRaw(root: string, cachePath?: string | undefined | null): Promise<NativeOkfSearch>
+  static openRaw(root: string, cachePath?: string | undefined | null, storage?: "memory" | "mmap" | undefined | null): Promise<NativeOkfSearch>
   save(path: string): Promise<void>
   close(): Promise<void>
   static fromRaw(inputs: Array<object>): NativeOkfSearch
@@ -58,7 +58,7 @@ export interface IndexStatusStats {
 }
 
 export interface IndexStorageStats {
-  kind: "in-memory-index-files"
+  kind: "in-memory-index-files" | "mapped-index-files"
   sizeInBytes: number
 }
 

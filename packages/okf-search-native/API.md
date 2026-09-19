@@ -178,10 +178,21 @@ const index = await openOkf("./knowledge", { cachePath });
 `openOkf(root, options?)` accepts:
 
 ```ts
-interface OkfOpenOptions {
-  readonly cachePath?: string;
-}
+type OkfOpenOptions =
+  | {
+      readonly cachePath?: string;
+      readonly storage?: "memory";
+    }
+  | {
+      readonly cachePath: string;
+      readonly storage: "mmap";
+    };
 ```
+
+`storage` defaults to `"memory"`. `"mmap"` requires `cachePath` and gives the
+handle a private mapped Tantivy workspace; the portable `.okf` archive is still
+read as ordinary bytes. Invalid storage combinations reject with
+`ERR_OKF_FIELD` and never fall back to memory.
 
 - **Cache hit:** an existing cache is loaded directly. The source `root` is not
   accessed, does not need to exist, and is not used to rebase saved identities.
@@ -366,19 +377,29 @@ detached, recursively frozen snapshot from a package-root handle:
       unclassified: number;
     };
   };
-  storage: {
-    kind: "in-memory-index-files";
-    sizeInBytes: number;
-  };
+  storage:
+    | {
+        kind: "in-memory-index-files";
+        sizeInBytes: number;
+      }
+    | {
+        kind: "mapped-index-files";
+        sizeInBytes: number;
+      };
 }
 ```
 
+Logical values count documents, not sections, and change only after a successful
+`ingest` or `remove`. `types` preserves case and is sorted by type. Missing
+effective status or trust-tier metadata counts as `unclassified`.
 
-Logical values count documents, not sections, and change only after a
-successful `ingest` or `remove`. `types` preserves case and is sorted by type.
-Missing effective status or trust-tier metadata counts as `unclassified`.
-`sizeInBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
-process memory and can change without a logical change.
+`sizeInBytes` is a sampled backing-size metric. Memory mode samples Tantivy's
+`RamDirectory`. Mmap mode sums regular files directly in that handle's private
+workspace during one scan, including management, lock, temporary, and obsolete
+files still present. It does not recurse or follow symlinks. Entries that
+vanish before metadata is read are skipped; other scan failures report
+`ERR_OKF_READ`. Neither value is an exact committed-generation size, mapped
+page count, archive size, allocated-block count, or RSS measurement.
 
 ## Advanced: prepared API
 

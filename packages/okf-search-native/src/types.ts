@@ -78,9 +78,15 @@ export interface OkfDocumentInput {
   markdown: string;
 }
 
-export interface OkfOpenOptions {
-  readonly cachePath?: string;
-}
+export type OkfOpenOptions =
+  | {
+      readonly cachePath?: string;
+      readonly storage?: "memory";
+    }
+  | {
+      readonly cachePath: string;
+      readonly storage: "mmap";
+    };
 
 export type OkfDiagnosticCode = "ERR_OKF_PARSE" | "ERR_OKF_FIELD";
 
@@ -155,6 +161,10 @@ export interface OkfLogicalIndexStats {
 export type OkfIndexStorageStats =
   | {
       readonly kind: "in-memory-index-files";
+      readonly sizeInBytes: number;
+    }
+  | {
+      readonly kind: "mapped-index-files";
       readonly sizeInBytes: number;
     }
   | {

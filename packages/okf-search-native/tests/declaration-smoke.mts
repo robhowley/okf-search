@@ -58,7 +58,11 @@ type ExactPreparedRemove = Assert<Same<
 >>;
 type ExactNativeOpen = Assert<Same<
   typeof NativeOkfSearch.openRaw,
-  (root: string, cachePath?: string | null) => Promise<NativeOkfSearch>
+  (
+    root: string,
+    cachePath?: string | null,
+    storage?: "memory" | "mmap" | null,
+  ) => Promise<NativeOkfSearch>
 >>;
 type ExactNativeClose = Assert<Same<
   NativeOkfSearch["close"],
@@ -86,7 +90,8 @@ type ExactErrorCode = Assert<Same<
 >>;
 type ExactOpenOptions = Assert<Same<
   OkfOpenOptions,
-  { readonly cachePath?: string }
+  | { readonly cachePath?: string; readonly storage?: "memory" }
+  | { readonly cachePath: string; readonly storage: "mmap" }
 >>;
 type ExactOpen = Assert<Same<
   typeof openOkf,
@@ -140,6 +145,10 @@ type ExactIndexStorageStats = Assert<Same<
       readonly sizeInBytes: number;
     }
   | {
+      readonly kind: "mapped-index-files";
+      readonly sizeInBytes: number;
+    }
+  | {
       readonly kind: "serialized-index";
       readonly format: "minisearch-json-utf8";
       readonly sizeInBytes: number;
@@ -152,7 +161,14 @@ type ExactIndexStorageSize = Assert<Same<
 
 const unsupported = new OkfError("ERR_OKF_UNSUPPORTED", "autoSuggest");
 const rootHandle: OkfSearch = createOkfSearch([]);
-const opened: Promise<OkfSearch> = openOkf(".", { cachePath: ".cache/okf" });
+const opened: Promise<OkfSearch> = openOkf(".", {
+  cachePath: ".cache/okf",
+  storage: "mmap",
+});
+// @ts-expect-error mmap requires a cache path.
+openOkf(".", { storage: "mmap" });
+// @ts-expect-error storage accepts only the two native backends.
+openOkf(".", { storage: "disk" });
 const saved: Promise<void> = rootHandle.save(".cache/okf");
 const validation: OkfValidationResult = validateOkfDocument({
   path: "types.md",

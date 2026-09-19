@@ -92,6 +92,9 @@ await index.save(cachePath);
   metadata reports `ERR_OKF_CACHE_INCOMPATIBLE`.
 - **No cache:** without `cachePath`, the handle stays in memory and creates no
   cache artifacts. `cachePath` is a cache-file path, not a Markdown identity.
+- **Mapped mode:** pass `{ cachePath, storage: "mmap" }` to use a private
+  Tantivy `MmapDirectory`. `cachePath` is required, the archive remains an
+  ordinary snapshot file, and invalid options never fall back to memory.
 
 `openOkf` recursively reads lowercase `.md` files, excluding files named exactly
 `index.md` or `log.md`. See the [persistence contract](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#persistence)
