@@ -74,7 +74,7 @@ impl HandleState {
     pub(super) fn save(
         self: &Arc<Self>,
         env: Env,
-        path: Utf16String,
+        path: Unknown<'_>,
     ) -> NapiResult<Object<'static>> {
         let permit;
         let mut state = self.state.lock();
@@ -91,6 +91,7 @@ impl HandleState {
         *saving = true;
         permit = SavePermit(Some(self.clone()));
         let prepared = (|| {
+            let path = unsafe { Utf16String::from_napi_value(env.raw(), path.raw())? };
             let path = persistence::path(&path, "path").map_err(|e| preparation_error(&env, e))?;
             let guard =
                 persistence::WriterGuard::acquire(&path).map_err(|e| preparation_error(&env, e))?;
@@ -102,10 +103,10 @@ impl HandleState {
             self.inject("save-deferred")?;
             let (deferred, promise) = env.create_deferred::<(), Resolver>()?;
             let promise = unsafe { Object::from_napi_value(env.raw(), promise.raw())? };
-            Ok::<_, Error>((snapshot, guard, deferred, promise))
+            Ok::<_, Error>((snapshot, guard, deferred, promise, path))
         })();
         drop(state);
-        let (snapshot, guard, deferred, promise) = prepared?;
+        let (snapshot, guard, deferred, promise, path) = prepared?;
         let job = Arc::new(Mutex::new(Some((snapshot, guard, deferred, permit))));
         let worker_job = job.clone();
         if let Err(error) = self.spawn("okf-save", move || {
@@ -144,11 +145,10 @@ impl HandleState {
             let (snapshot, guard, deferred, permit) = job.lock().take().unwrap();
             drop(snapshot);
             drop(guard);
+            let mut failure = invalid("ERR_OKF_WRITE", &path, None);
+            failure.cause = Some(Box::new(error));
             permit.complete(|| {
-                deferred.reject(Error::new(
-                    Status::GenericFailure,
-                    format!("[ERR_OKF_WRITE] save scheduling failed: {error}"),
-                ))
+                deferred.resolve(Box::new(move |env| Err(preparation_error(&env, failure))))
             });
         }
         Ok(promise)

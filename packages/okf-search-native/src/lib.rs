@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 use levenshtein_automata::{DFA, Distance, LevenshteinAutomatonBuilder};
 use napi::bindgen_prelude::{
     Either, FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion, KeyFilter,
-    Object, Unknown, ValueType,
+    Object, Unknown, ValidateNapiValue, ValueType,
 };
 use napi::{Error, Result as NapiResult, Status};
 use napi_derive::napi;
@@ -2164,7 +2164,13 @@ impl NativeOkfSearch {
     }
 
     #[napi(js_name = "removeDocument")]
-    pub fn remove_document(&self, document_id: String) -> Result<bool, Error> {
+    pub fn remove_document(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "string")] document_id: Unknown<'_>,
+    ) -> Result<bool, Error> {
+        self.inner.admit()?.usable().map_err(native_error)?;
+        let document_id = unsafe { String::from_napi_value(env.raw(), document_id.raw())? };
         self.inner
             .admit()?
             .remove(&document_id)
@@ -2174,13 +2180,21 @@ impl NativeOkfSearch {
     #[napi]
     pub fn search(
         &self,
-        query: String,
-        #[napi(ts_arg_type = "SearchOptions | undefined | null")] options: Option<Object<'_>>,
+        env: Env,
+        #[napi(ts_arg_type = "string")] query: Unknown<'_>,
+        #[napi(ts_arg_type = "SearchOptions | undefined | null")] options: Option<Unknown<'_>>,
     ) -> Result<Vec<SearchHit>, Error> {
         {
             let engine = self.inner.admit()?;
             engine.usable().map_err(native_error)?;
         }
+        let query = unsafe { String::from_napi_value(env.raw(), query.raw())? };
+        let options = options
+            .map(|value| unsafe {
+                Object::validate(env.raw(), value.raw())?;
+                Object::from_napi_value(env.raw(), value.raw())
+            })
+            .transpose()?;
         let options = parse_search_options(options)?;
         self.inner.admit()?.search(&query, options)
     }
@@ -2217,10 +2231,12 @@ impl NativeOkfSearch {
     #[napi(js_name = "autoSuggest")]
     pub fn auto_suggest(
         &self,
-        _query: String,
+        env: Env,
+        #[napi(ts_arg_type = "string")] _query: Unknown<'_>,
         #[napi(ts_arg_type = "SearchOptions | undefined | null")] _options: Option<Unknown<'_>>,
     ) -> Result<Vec<Suggestion>, Error> {
         self.inner.admit()?.usable().map_err(native_error)?;
+        let _query = unsafe { String::from_napi_value(env.raw(), _query.raw())? };
         Err(Error::new(
             Status::GenericFailure,
             "[ERR_OKF_UNSUPPORTED] autoSuggest is not implemented by the Tantivy backend",
@@ -2247,7 +2263,11 @@ impl NativeOkfSearch {
     }
 
     #[napi(ts_return_type = "Promise<void>")]
-    pub fn save(&self, env: Env, path: Utf16String) -> Result<Object<'static>, Error> {
+    pub fn save(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "string")] path: Unknown<'_>,
+    ) -> Result<Object<'static>, Error> {
         self.inner.save(env, path)
     }
 
@@ -2297,8 +2317,16 @@ impl NativeOkfSearch {
     }
 
     #[napi(js_name = "ingestRaw", ts_return_type = "unknown")]
-    pub fn ingest_raw(&self, env: Env, input: Object<'_>) -> Result<Object<'static>, Error> {
+    pub fn ingest_raw(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "object")] input: Unknown<'_>,
+    ) -> Result<Object<'static>, Error> {
         self.inner.admit()?.usable().map_err(native_error)?;
+        let input = unsafe {
+            Object::validate(env.raw(), input.raw())?;
+            Object::from_napi_value(env.raw(), input.raw())?
+        };
         // No engine lock survives across caller-owned getters.
         let entry = prepare(snapshot(input)?).map_err(|error| preparation_error(&env, error))?;
         let response = ingest_result(&env, &entry)?;
@@ -2312,8 +2340,13 @@ impl NativeOkfSearch {
     }
 
     #[napi(js_name = "removePath")]
-    pub fn remove_path(&self, env: Env, path: Utf16String) -> Result<bool, Error> {
+    pub fn remove_path(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "string")] path: Unknown<'_>,
+    ) -> Result<bool, Error> {
         self.inner.admit()?.usable().map_err(native_error)?;
+        let path = unsafe { Utf16String::from_napi_value(env.raw(), path.raw())? };
         let identity = identity(path).map_err(|error| preparation_error(&env, error))?;
         self.inner
             .admit()?
@@ -3996,7 +4029,7 @@ mod tests {
                 .list_degraded()
                 .map_err(native_error),
         );
-        assert_napi_unusable(native.auto_suggest("healthy".to_owned(), None));
+        assert_napi_unusable(native.assert_usable());
         assert_napi_unusable(
             native
                 .inner
@@ -4005,7 +4038,14 @@ mod tests {
                 .ingest(document(strict_section("second", "healthy")))
                 .map_err(native_error),
         );
-        assert_napi_unusable(native.remove_document("first".to_owned()));
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .remove("first")
+                .map_err(native_error),
+        );
     }
 
     #[test]

@@ -21,8 +21,30 @@ function assertClosed(index) {
     () => index.ingestPrepared({ get documentId() { throw Error('getter ran'); } }),
     () => index.ingestPrepared({ documentId: '', path: '', type: '', title: '', tags: [], conformance: 'strict', stalenessClassified: false, resource: '', description: '', sourceText: '', sections: [], diagnostics: [] }),
   ]) assert.throws(call, closed);
+  for (const value of [undefined, null, 42, true, Symbol('invalid'), {}, []]) {
+    for (const call of [
+      () => index.removeDocument(value), () => index.search(value),
+      () => index.search('query', value), () => index.autoSuggest(value),
+      () => index.save(value), () => index.ingestRaw(value),
+      () => index.ingestPrepared(value), () => index.removePath(value),
+    ]) assert.throws(call, closed);
+  }
 }
 async function main() {
+  const open = fresh();
+  for (const value of [undefined, null, 42, true, Symbol('invalid'), {}, []]) {
+    for (const call of [
+      () => open.removeDocument(value), () => open.search(value),
+      () => open.autoSuggest(value), () => open.save(value), () => open.removePath(value),
+    ]) assert.throws(call);
+  }
+  for (const value of [42, true, Symbol('invalid')]) {
+    assert.throws(() => open.search('query', value));
+    assert.throws(() => open.ingestRaw(value));
+  }
+  await open.save(target('invalid-arguments-retry'));
+  await open.close();
+  assertClosed(open);
   const prepared = Native.fromPrepared([]);
   const preparedDocument = { documentId: 'prepared', path: 'prepared.md', type: 'note', title: '', tags: [], conformance: 'strict', status: 'stable', trustTier: 'unverified', stalenessClassified: true, resource: '', description: '', sourceText: '', sections: [{ sectionId: 'prepared#0', headingPath: '', text: 'preparedneedle', startLine: 1, endLine: 1 }], diagnostics: [] };
   prepared.ingestPrepared(preparedDocument);
@@ -44,7 +66,9 @@ async function main() {
     const previous = fs.readFileSync(destination);
     index.ingestRaw(document('retryneedle'));
     hook(index, `fail:${point}`);
-    await assert.rejects(async () => index.save(destination));
+    await assert.rejects(async () => index.save(destination), point === 'okf-save'
+      ? { code: 'ERR_OKF_WRITE', path: destination }
+      : undefined);
     assert.deepEqual(fs.readFileSync(destination), previous);
     assert.equal(index.search('retryneedle').length, 1);
     await index.save(destination);
@@ -53,9 +77,22 @@ async function main() {
     const contender = fresh();
     await contender.save(destination);
     await Promise.all([index.close(), contender.close(), restored.close()]);
+    assertClosed(index);
     if (owned) assert(!fs.existsSync(owned));
   }
   }
+  // Exercise real native scheduling failure through the built facade translator.
+  const facadeNative = fresh();
+  const loader = require.resolve('../../native.cjs');
+  require.cache[loader] = { id: loader, filename: loader, loaded: true,
+    exports: { NativeOkfSearch: { fromRaw: () => facadeNative } } };
+  const facade = require('../../dist/index.cjs').createOkfSearch([]);
+  const facadeDestination = target('facade-spawn');
+  hook(facadeNative, 'fail:okf-save');
+  await assert.rejects(facade.save(facadeDestination), { code: 'ERR_OKF_WRITE', path: facadeDestination });
+  await facade.save(facadeDestination);
+  await facade.close();
+
   // Invalid destination and destination contention also release the save permit.
   const index = fresh();
   assert.throws(() => index.save(''));
@@ -73,6 +110,7 @@ async function main() {
   const repeated = index.close();
   hook(index, 'release');
   await Promise.all([first, close, repeated]);
+  assertClosed(index);
   assert.equal(hook(index, 'events').filter(x => x.startsWith('teardown:')).length, 1);
   const restored = await Native.openRaw(root, target('capture'));
   assert.equal(restored.search('capturedneedle').length, 1);
