@@ -19,6 +19,7 @@ export declare class NativeOkfSearch {
   static validateRaw(input: object): unknown
   static openRaw(root: string, cachePath?: string | undefined | null): Promise<NativeOkfSearch>
   save(path: string): Promise<void>
+  close(): Promise<void>
   static fromRaw(inputs: Array<object>): NativeOkfSearch
   assertUsable(): void
   ingestRaw(input: object): unknown

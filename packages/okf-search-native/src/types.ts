@@ -92,6 +92,9 @@ export type OkfErrorCode =
   | "ERR_OKF_CACHE_INCOMPATIBLE"
   | "ERR_OKF_WRITE"
   | "ERR_OKF_CACHE_BUSY"
+  | "ERR_OKF_INDEX_CLOSED"
+  | "ERR_OKF_PERSISTENCE_BUSY"
+  | "ERR_OKF_CLOSE"
   | "ERR_OKF_INDEX_UNUSABLE"
   | "ERR_OKF_UNSUPPORTED";
 
@@ -217,6 +220,7 @@ export interface OkfSearchHit {
 export interface OkfSearch {
   indexStats(): OkfIndexStats;
   save(path: string): Promise<void>;
+  close(): Promise<void>;
   ingest(input: OkfDocumentInput): OkfIngestResult;
   listDegradedDocuments(): readonly OkfDegradedDocument[];
   listTypes(): readonly string[];

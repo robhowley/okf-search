@@ -60,6 +60,10 @@ type ExactNativeOpen = Assert<Same<
   typeof NativeOkfSearch.openRaw,
   (root: string, cachePath?: string | null) => Promise<NativeOkfSearch>
 >>;
+type ExactNativeClose = Assert<Same<
+  NativeOkfSearch["close"],
+  () => Promise<void>
+>>;
 type ExactNativeSave = Assert<Same<
   NativeOkfSearch["save"],
   (path: string) => Promise<void>
@@ -75,6 +79,9 @@ type ExactErrorCode = Assert<Same<
   | "ERR_OKF_WRITE"
   | "ERR_OKF_CACHE_BUSY"
   | "ERR_OKF_INDEX_UNUSABLE"
+  | "ERR_OKF_INDEX_CLOSED"
+  | "ERR_OKF_PERSISTENCE_BUSY"
+  | "ERR_OKF_CLOSE"
   | "ERR_OKF_UNSUPPORTED"
 >>;
 type ExactOpenOptions = Assert<Same<

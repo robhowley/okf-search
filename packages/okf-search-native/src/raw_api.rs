@@ -1,7 +1,6 @@
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, Object, ToNapiValue, Unknown, Utf16String};
 use napi::{Env, Error, Result, Task};
 use okf_prepare_core::{self as core, Prepared};
-use parking_lot::Mutex;
 
 use crate::preparation::{self, Identity, PreparationError, PreparedEntry};
 use crate::{Engine, NativeOkfSearch, native_error};
@@ -125,7 +124,7 @@ impl Task for OpenTask {
             match crate::persistence::load(&path) {
                 Ok(Some(engine)) => {
                     return Ok(Ok(NativeOkfSearch {
-                        inner: Mutex::new(engine),
+                        inner: crate::lifecycle::HandleState::new(engine),
                     }));
                 }
                 Err(e) => return Ok(Err(e)),
@@ -138,7 +137,7 @@ impl Task for OpenTask {
             match crate::persistence::load(&path) {
                 Ok(Some(engine)) => {
                     return Ok(Ok(NativeOkfSearch {
-                        inner: Mutex::new(engine),
+                        inner: crate::lifecycle::HandleState::new(engine),
                     }));
                 }
                 Err(e) => return Ok(Err(e)),
@@ -166,7 +165,7 @@ impl Task for OpenTask {
             return Ok(Err(e));
         }
         Ok(Ok(NativeOkfSearch {
-            inner: Mutex::new(engine),
+            inner: crate::lifecycle::HandleState::new(engine),
         }))
     }
     fn resolve(&mut self, env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -416,7 +415,8 @@ mod persistence_tests {
         assert_eq!(
             opened
                 .inner
-                .lock()
+                .admit()
+                .unwrap()
                 .index_stats()
                 .unwrap()
                 .logical
@@ -436,7 +436,8 @@ mod persistence_tests {
         assert_eq!(
             loaded
                 .inner
-                .lock()
+                .admit()
+                .unwrap()
                 .index_stats()
                 .unwrap()
                 .logical
@@ -479,7 +480,8 @@ mod persistence_tests {
             assert_eq!(
                 opened
                     .inner
-                    .lock()
+                    .admit()
+                    .unwrap()
                     .index_stats()
                     .unwrap()
                     .logical

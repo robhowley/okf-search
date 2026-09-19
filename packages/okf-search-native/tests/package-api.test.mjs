@@ -551,9 +551,10 @@ test("package API rejects overlapping writers and allows retry", async () => {
     const rejected = results.filter((result) => result.status === "rejected");
     assert.equal(fulfilled.length, 1);
     assert.equal(rejected.length, 1);
-    assert.equal(rejected[0].reason.code, "ERR_OKF_CACHE_BUSY");
-    assert.equal(rejected[0].reason.path, cachePath);
+    assert.equal(rejected[0].reason.code, "ERR_OKF_PERSISTENCE_BUSY");
+    assert.equal(rejected[0].reason.path, "<index>");
     await index.save(cachePath);
+    await index.close();
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

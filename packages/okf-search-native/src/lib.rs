@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
 mod filesystem;
+mod lifecycle;
 mod persistence;
 mod preparation;
 mod raw_api;
@@ -1204,7 +1205,7 @@ impl Drop for Engine {
 }
 
 impl Engine {
-    // Public close is wired in the next phase; finalization already uses the same path.
+    // HandleState drains accepted saves before consuming the engine here.
     fn shutdown(mut self) -> Result<(), shutdown::ShutdownError> {
         self.shutdown_owned()
     }
@@ -2126,7 +2127,7 @@ fn native_error(error: EngineError) -> Error {
 /// Native search handle for raw Markdown and the existing prepared-document API.
 #[napi]
 pub struct NativeOkfSearch {
-    inner: Mutex<Engine>,
+    inner: std::sync::Arc<lifecycle::HandleState>,
 }
 
 #[napi]
@@ -2135,18 +2136,29 @@ impl NativeOkfSearch {
     pub fn from_prepared(documents: Vec<PreparedDocument>) -> Result<Self, Error> {
         let engine = Engine::new(documents).map_err(native_error)?;
         Ok(Self {
-            inner: Mutex::new(engine),
+            inner: lifecycle::HandleState::new(engine),
         })
     }
 
     #[napi(js_name = "ingestPrepared")]
-    pub fn ingest_prepared(&self, document: PreparedDocument) -> Result<(), Error> {
-        self.inner.lock().ingest(document).map_err(native_error)
+    pub fn ingest_prepared(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "PreparedDocument")] document: Unknown<'_>,
+    ) -> Result<(), Error> {
+        self.inner.admit()?.usable().map_err(native_error)?;
+        // Generated object conversion executes caller getters. Admit first and
+        // release the lock before conversion, then recheck after reentrant calls.
+        let document = unsafe { PreparedDocument::from_napi_value(env.raw(), document.raw())? };
+        self.inner.admit()?.ingest(document).map_err(native_error)
     }
 
     #[napi(js_name = "removeDocument")]
     pub fn remove_document(&self, document_id: String) -> Result<bool, Error> {
-        self.inner.lock().remove(&document_id).map_err(native_error)
+        self.inner
+            .admit()?
+            .remove(&document_id)
+            .map_err(native_error)
     }
 
     #[napi]
@@ -2156,26 +2168,26 @@ impl NativeOkfSearch {
         #[napi(ts_arg_type = "SearchOptions | undefined | null")] options: Option<Object<'_>>,
     ) -> Result<Vec<SearchHit>, Error> {
         {
-            let engine = self.inner.lock();
+            let engine = self.inner.admit()?;
             engine.usable().map_err(native_error)?;
         }
         let options = parse_search_options(options)?;
-        self.inner.lock().search(&query, options)
+        self.inner.admit()?.search(&query, options)
     }
 
     #[napi(js_name = "indexStats")]
     pub fn index_stats(&self) -> Result<IndexStats, Error> {
-        self.inner.lock().index_stats().map_err(native_error)
+        self.inner.admit()?.index_stats().map_err(native_error)
     }
 
     #[napi(js_name = "listTypes")]
     pub fn list_types(&self) -> Result<Vec<String>, Error> {
-        self.inner.lock().list_types().map_err(native_error)
+        self.inner.admit()?.list_types().map_err(native_error)
     }
 
     #[napi(js_name = "listDegradedDocuments")]
     pub fn list_degraded_documents(&self) -> Result<Vec<DegradedDocument>, Error> {
-        self.inner.lock().list_degraded().map_err(native_error)
+        self.inner.admit()?.list_degraded().map_err(native_error)
     }
 
     /// Tantivy exposes the pieces needed to build completion, but not the
@@ -2186,9 +2198,9 @@ impl NativeOkfSearch {
     pub fn auto_suggest(
         &self,
         _query: String,
-        _options: Option<SearchOptions>,
+        #[napi(ts_arg_type = "SearchOptions | undefined | null")] _options: Option<Unknown<'_>>,
     ) -> Result<Vec<Suggestion>, Error> {
-        self.inner.lock().usable().map_err(native_error)?;
+        self.inner.admit()?.usable().map_err(native_error)?;
         Err(Error::new(
             Status::GenericFailure,
             "[ERR_OKF_UNSUPPORTED] autoSuggest is not implemented by the Tantivy backend",
@@ -2212,21 +2224,13 @@ impl NativeOkfSearch {
     }
 
     #[napi(ts_return_type = "Promise<void>")]
-    pub fn save(
-        &self,
-        env: Env,
-        path: Utf16String,
-    ) -> Result<napi::bindgen_prelude::AsyncTask<persistence::SaveTask>, Error> {
-        let engine = self.inner.lock();
-        engine.usable().map_err(native_error)?;
-        let path = persistence::path(&path, "path").map_err(|e| preparation_error(&env, e))?;
-        let guard =
-            persistence::WriterGuard::acquire(&path).map_err(|e| preparation_error(&env, e))?;
-        let snapshot =
-            persistence::Snapshot::capture(&engine).map_err(|e| preparation_error(&env, e))?;
-        Ok(napi::bindgen_prelude::AsyncTask::new(
-            persistence::SaveTask::new(snapshot, guard),
-        ))
+    pub fn save(&self, env: Env, path: Utf16String) -> Result<Object<'static>, Error> {
+        self.inner.save(env, path)
+    }
+
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn close(&self, env: Env) -> Result<Object<'static>, Error> {
+        self.inner.close(env)
     }
 
     #[napi(factory, js_name = "fromRaw")]
@@ -2266,19 +2270,19 @@ impl NativeOkfSearch {
 
     #[napi(js_name = "assertUsable")]
     pub fn assert_usable(&self) -> Result<(), Error> {
-        self.inner.lock().usable().map_err(native_error)
+        self.inner.admit()?.usable().map_err(native_error)
     }
 
     #[napi(js_name = "ingestRaw", ts_return_type = "unknown")]
     pub fn ingest_raw(&self, env: Env, input: Object<'_>) -> Result<Object<'static>, Error> {
-        self.inner.lock().usable().map_err(native_error)?;
+        self.inner.admit()?.usable().map_err(native_error)?;
         // No engine lock survives across caller-owned getters.
         let entry = prepare(snapshot(input)?).map_err(|error| preparation_error(&env, error))?;
         let response = ingest_result(&env, &entry)?;
         let path = entry.identity.path.clone();
         let document = entry.into_document().map_err(native_error)?;
         self.inner
-            .lock()
+            .admit()?
             .ingest(document)
             .map_err(|error| raw_api::mutation_error(&env, error, &path))?;
         Ok(response)
@@ -2286,10 +2290,10 @@ impl NativeOkfSearch {
 
     #[napi(js_name = "removePath")]
     pub fn remove_path(&self, env: Env, path: Utf16String) -> Result<bool, Error> {
-        self.inner.lock().usable().map_err(native_error)?;
+        self.inner.admit()?.usable().map_err(native_error)?;
         let identity = identity(path).map_err(|error| preparation_error(&env, error))?;
         self.inner
-            .lock()
+            .admit()?
             .remove(&identity.document_id)
             .map_err(|error| raw_api::mutation_error(&env, error, &identity.path))
     }
@@ -2298,6 +2302,10 @@ impl NativeOkfSearch {
 #[cfg(feature = "test-fixtures")]
 #[path = "../tests/fixtures/poison.rs"]
 pub mod poison_fixture;
+
+#[cfg(feature = "test-fixtures")]
+#[path = "../tests/fixtures/lifecycle.rs"]
+pub mod lifecycle_fixture;
 
 #[cfg(test)]
 mod tests {
@@ -3935,17 +3943,45 @@ mod tests {
             "healthy needle",
         ))])
         .expect("baseline");
-        add_record_without_title(&mut native.inner.lock());
+        add_record_without_title(&mut native.inner.admit().unwrap());
 
         // JS error projection requires a live Env; the addon fixture test checks
         // these exported methods. Keep the corruption/state transition proof here.
-        assert_napi_unusable(native.inner.lock().search("corruptneedle", None));
-        assert_napi_unusable(native.inner.lock().search("healthy", None));
-        assert_napi_unusable(native.inner.lock().index_stats().map_err(native_error));
-        assert_napi_unusable(native.inner.lock().list_types().map_err(native_error));
-        assert_napi_unusable(native.inner.lock().list_degraded().map_err(native_error));
+        assert_napi_unusable(native.inner.admit().unwrap().search("corruptneedle", None));
+        assert_napi_unusable(native.inner.admit().unwrap().search("healthy", None));
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .index_stats()
+                .map_err(native_error),
+        );
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .list_types()
+                .map_err(native_error),
+        );
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .list_degraded()
+                .map_err(native_error),
+        );
         assert_napi_unusable(native.auto_suggest("healthy".to_owned(), None));
-        assert_napi_unusable(native.ingest_prepared(document(strict_section("second", "healthy"))));
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .ingest(document(strict_section("second", "healthy")))
+                .map_err(native_error),
+        );
         assert_napi_unusable(native.remove_document("first".to_owned()));
     }
 

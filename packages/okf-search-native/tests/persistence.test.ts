@@ -378,7 +378,7 @@ stale_after: 2027-01-01T00:00:00Z`,
     );
     expect(fulfilled).toHaveLength(1);
     expect(rejectedResults).toHaveLength(1);
-    expectOkfError(rejectedResults[0]!.reason, "ERR_OKF_CACHE_BUSY", cachePath);
+    expectOkfError(rejectedResults[0]!.reason, "ERR_OKF_PERSISTENCE_BUSY", "<index>");
 
     await expect(index.save(cachePath)).resolves.toBeUndefined();
 

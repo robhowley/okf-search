@@ -34,8 +34,11 @@ export function createOkfSearch(
 
 export function wrapNative(native: NativeOkfSearch): OkfSearch {
   let unusableError: OkfError | undefined;
+  let closing = false;
+  let closePromise: Promise<void> | undefined;
 
   const assertUsable = (): void => {
+    if (closing) throw new OkfError("ERR_OKF_INDEX_CLOSED", "<index>");
     if (unusableError) {
       throw unusableError;
     }
@@ -81,6 +84,18 @@ export function wrapNative(native: NativeOkfSearch): OkfSearch {
     indexStats(): OkfIndexStats {
       assertUsable();
       return copyIndexStats(callNative("<index>", () => native.indexStats()));
+    },
+
+    close(): Promise<void> {
+      if (closePromise) return closePromise;
+      closing = true;
+      try {
+        closePromise = native.close().catch(error => translateNativeFailure("<index>", error));
+        return closePromise;
+      } catch (error) {
+        closing = false;
+        return Promise.reject(error).catch(error => translateNativeFailure("<index>", error));
+      }
     },
 
     async save(path): Promise<void> {

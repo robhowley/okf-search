@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { NativeOkfSearch } from "../native.cjs";
@@ -317,4 +321,62 @@ describe("friendly root lifecycle", () => {
       prototype.search = original;
     }
   });
+});
+
+
+describe("close admission", () => {
+  it("caches close and rejects every facade operation before getters/early returns", async () => {
+    const index = createOkfSearch([]);
+    const close = index.close();
+    expect(index.close()).toBe(close);
+    for (const call of [
+      () => index.search("", { limit: 0 }),
+      () => index.ingest({ get path(): string { throw Error("getter"); }, markdown: "" }),
+      () => index.remove(""), () => index.listTypes(),
+      () => index.listDegradedDocuments(), () => index.indexStats(),
+      () => index.autoSuggest(""),
+    ]) expect(call).toThrowError(expect.objectContaining({ code: "ERR_OKF_INDEX_CLOSED" }));
+    await expect(index.save("")).rejects.toMatchObject({ code: "ERR_OKF_INDEX_CLOSED" });
+    await close;
+    expect(index.close()).toBe(close);
+  });
+
+  it("restores facade admission after synchronous close failure but caches asynchronous failure", async () => {
+    const original = NativeOkfSearch.prototype.close;
+    let attempt = 0;
+    NativeOkfSearch.prototype.close = function () {
+      if (++attempt === 1) throw Error("deferred allocation");
+      return Promise.reject(Error("[ERR_OKF_CLOSE] scheduling"));
+    };
+    try {
+      const index = createOkfSearch([]);
+      await expect(index.close()).rejects.toThrow("deferred allocation");
+      expect(index.search("")).toEqual([]);
+      const close = index.close();
+      expect(index.close()).toBe(close);
+      await expect(close).rejects.toMatchObject({ code: "ERR_OKF_CLOSE" });
+      expect(index.close()).toBe(close);
+      expect(() => index.search("")).toThrowError(expect.objectContaining({ code: "ERR_OKF_INDEX_CLOSED" }));
+    } finally { NativeOkfSearch.prototype.close = original; }
+  });
+
+  it("recovers native failures and deterministic save/close handoffs", () => {
+    const root = join(__dirname, "..");
+    const build = spawnSync("cargo", ["build", "--locked", "--features", "test-fixtures", "--quiet"], { cwd: root, encoding: "utf8" });
+    expect(build.status, build.stderr).toBe(0);
+    const temporary = mkdtempSync(join(tmpdir(), "okf-lifecycle-fixture-"));
+    try {
+      const library = process.platform === "darwin" ? "libokf_search_native.dylib" : process.platform === "win32" ? "okf_search_native.dll" : "libokf_search_native.so";
+      const addon = join(temporary, "fixture.node");
+      const target = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "target");
+      const debug = process.env.CARGO_BUILD_TARGET ? join(target, process.env.CARGO_BUILD_TARGET, "debug") : join(target, "debug");
+      copyFileSync(join(debug, library), addon);
+      const child = spawnSync(process.execPath, [join(root, "tests/fixtures/lifecycle.cjs"), addon, temporary], {
+        cwd: root, encoding: "utf8", timeout: 90_000,
+        env: { ...process.env, UV_THREADPOOL_SIZE: "1" },
+      });
+      expect(child.error).toBeUndefined();
+      expect(child.status, `${child.stdout}\n${child.stderr}`).toBe(0);
+    } finally { rmSync(temporary, { recursive: true, force: true }); }
+  }, 120_000);
 });

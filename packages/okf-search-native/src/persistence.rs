@@ -842,29 +842,6 @@ fn validate_terms(
     Ok(())
 }
 
-pub struct SaveTask {
-    snapshot: Option<Snapshot>,
-    guard: WriterGuard,
-}
-impl SaveTask {
-    pub(super) fn new(snapshot: Snapshot, guard: WriterGuard) -> Self {
-        Self {
-            snapshot: Some(snapshot),
-            guard,
-        }
-    }
-}
-impl napi::Task for SaveTask {
-    type Output = Result<()>;
-    type JsValue = ();
-    fn compute(&mut self) -> napi::Result<Self::Output> {
-        Ok(self.snapshot.take().unwrap().publish(&self.guard))
-    }
-    fn resolve(&mut self, env: Env, output: Self::Output) -> napi::Result<()> {
-        output.map_err(|e| preparation_error(&env, e))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,11 +8,13 @@ use tantivy::IndexWriter;
 #[cfg(test)]
 thread_local! { static REMOVALS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) }; }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ShutdownError {
     pub(crate) message: String,
     pub(crate) workspace: Option<PathBuf>,
 }
+
+impl std::error::Error for ShutdownError {}
 
 impl std::fmt::Display for ShutdownError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -168,7 +170,7 @@ mod tests {
 
     #[test]
     fn actual_worker_failure_preserves_workspace_while_another_worker_is_live() {
-        for mode in ["explicit", "partial", "unassembled", "finalizer"] {
+        for mode in ["explicit", "partial", "unassembled", "finalizer", "handle"] {
             worker_failure(mode);
         }
     }
@@ -228,7 +230,9 @@ mod tests {
                 engine._index = index;
                 engine.storage = storage;
                 engine.workspace = Some(owned_path);
-                if mode == "explicit" {
+                if mode == "handle" {
+                    crate::lifecycle::HandleState::test_teardown(engine).map_err(|e| e.to_string())
+                } else if mode == "explicit" {
                     engine.shutdown().map_err(|e| e.to_string())
                 } else if mode == "partial" {
                     let original =

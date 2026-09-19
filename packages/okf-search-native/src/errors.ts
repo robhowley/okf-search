@@ -52,6 +52,12 @@ function message(
       return `Cannot write OKF cache: ${subject}`;
     case "ERR_OKF_CACHE_BUSY":
       return `OKF cache is busy: ${subject}`;
+    case "ERR_OKF_INDEX_CLOSED":
+      return "Search index is closing or closed";
+    case "ERR_OKF_PERSISTENCE_BUSY":
+      return "A save is already outstanding for this search index";
+    case "ERR_OKF_CLOSE":
+      return `Cannot close OKF index: ${subject}`;
     case "ERR_OKF_INDEX_UNUSABLE":
       return path === "<index>"
         ? "Search index is permanently unusable and must be rebuilt"
@@ -84,6 +90,11 @@ export function throwNativeError(error: unknown, path: string): never {
       });
     }
   }
+  for (const code of ["ERR_OKF_INDEX_CLOSED", "ERR_OKF_PERSISTENCE_BUSY", "ERR_OKF_CLOSE"] as const) {
+    if (message.startsWith(`[${code}]`)) {
+      throw new OkfError(code, path, { cause: error });
+    }
+  }
   if (POISON_MARKER.test(message)) {
     throw new OkfError("ERR_OKF_INDEX_UNUSABLE", path);
   }
@@ -97,7 +108,8 @@ export function throwNativeError(error: unknown, path: string): never {
 function isNativeStructuredCode(
   code: string,
 ): code is Exclude<OkfErrorCode, "ERR_OKF_UNSUPPORTED"> {
-  return code === "ERR_OKF_READ" ||
+  return code === "ERR_OKF_CLOSE" ||
+    code === "ERR_OKF_READ" ||
     code === "ERR_OKF_PARSE" ||
     code === "ERR_OKF_FIELD" ||
     code === "ERR_OKF_CACHE_INVALID" ||
