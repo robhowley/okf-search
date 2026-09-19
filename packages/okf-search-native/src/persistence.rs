@@ -1,13 +1,14 @@
 //! One portable payload plus a retained sibling OS-lock file. Local filesystems only;
 //! atomic visibility is not a power-loss durability guarantee.
 use super::*;
+use crate::storage::{CapturedDirectory, Files};
 use fs4::fs_std::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use tantivy::directory::Directory;
+use tantivy::directory::{Directory, META_LOCK, OwnedBytes, RamDirectory};
 
 const MAGIC: &[u8; 8] = b"OKFCACHE";
 const FORMAT: u32 = 3;
@@ -233,23 +234,86 @@ where
     deserializer.deserialize_map(Visitor(std::marker::PhantomData))
 }
 pub(super) struct Snapshot {
-    directory: RamDirectory,
+    payload: SnapshotPayload,
     documents: BTreeMap<String, DocumentState>,
 }
+enum SnapshotPayload {
+    Memory(RamDirectory),
+    Copied(Files),
+}
 impl Snapshot {
-    pub(super) fn capture(engine: &Engine) -> Self {
-        Self {
-            directory: engine.ram_directory.deep_clone(),
-            documents: engine.documents.clone(),
-        }
+    pub(super) fn capture(engine: &Engine) -> Result<Self> {
+        Self::capture_inner(
+            engine,
+            #[cfg(test)]
+            |_| {},
+        )
+        .map_err(|e| {
+            let context = match &engine.storage {
+                IndexStorage::Memory(_) => "<memory>".into(),
+                IndexStorage::Mmap { workspace, .. } => workspace.path().display().to_string(),
+            };
+            error("ERR_OKF_READ", &context, e)
+        })
     }
-    fn files(&self) -> tantivy::Result<BTreeMap<String, Vec<u8>>> {
-        let index = Index::open(self.directory.clone())?;
+    fn capture_inner(
+        engine: &Engine,
+        #[cfg(test)] mut checkpoint: impl FnMut(&str),
+    ) -> tantivy::Result<Self> {
+        let payload = match &engine.storage {
+            IndexStorage::Memory(directory) => SnapshotPayload::Memory(directory.deep_clone()),
+            IndexStorage::Mmap { .. } => {
+                let directory = engine._index.directory();
+                let _lock = directory.acquire_lock(&META_LOCK)?;
+                // Use this Index's inventory so GC sees our tracked SegmentMetas.
+                let metas = engine._index.load_metas()?;
+                #[cfg(test)]
+                checkpoint("selected");
+                let mut files = Files::new();
+                files.insert(
+                    "meta.json".into(),
+                    OwnedBytes::new(serde_json::to_vec(&metas)?),
+                );
+                for segment in &metas.segments {
+                    for name in segment.list_files() {
+                        if directory.exists(&name)? {
+                            files.insert(
+                                name.to_str()
+                                    .ok_or_else(|| {
+                                        std::io::Error::other("non UTF-8 index filename")
+                                    })?
+                                    .to_owned(),
+                                OwnedBytes::new(directory.atomic_read(&name)?),
+                            );
+                        }
+                    }
+                }
+                let names: BTreeSet<_> = files.keys().cloned().collect();
+                files.insert(
+                    ".managed.json".into(),
+                    OwnedBytes::new(serde_json::to_vec(&names)?),
+                );
+                SnapshotPayload::Copied(files)
+            }
+        };
+        #[cfg(test)]
+        checkpoint("released");
+        Ok(Self {
+            payload,
+            documents: engine.documents.clone(),
+        })
+    }
+    fn files(&self) -> tantivy::Result<Files> {
+        let directory = match &self.payload {
+            SnapshotPayload::Copied(files) => return Ok(files.clone()),
+            SnapshotPayload::Memory(directory) => directory,
+        };
+        let index = Index::open(directory.clone())?;
         let metas = index.load_metas()?;
         let mut names = BTreeSet::from([PathBuf::from("meta.json")]);
         for segment in metas.segments {
             for file in segment.list_files() {
-                if self.directory.exists(&file)? {
+                if directory.exists(&file)? {
                     names.insert(file);
                 }
             }
@@ -260,10 +324,13 @@ impl Snapshot {
                 name.to_str()
                     .ok_or_else(|| std::io::Error::other("non UTF-8 index filename"))?
                     .to_owned(),
-                self.directory.atomic_read(name)?,
+                OwnedBytes::new(directory.atomic_read(name)?),
             );
         }
-        files.insert(".managed.json".into(), serde_json::to_vec(&names)?);
+        files.insert(
+            ".managed.json".into(),
+            OwnedBytes::new(serde_json::to_vec(&names)?),
+        );
         Ok(files)
     }
     pub(super) fn publish(self, guard: &WriterGuard) -> Result<()> {
@@ -291,8 +358,13 @@ impl Snapshot {
         let invalid = |e| error("ERR_OKF_CACHE_INVALID", &guard.supplied, e);
         let files = self.files().map_err(invalid)?;
         // Validate the detached committed generation, never the mutating live directory.
-        restore(&files, self.documents.clone(), false)
-            .map_err(|e| error("ERR_OKF_CACHE_INVALID", &guard.supplied, e))?;
+        validate_managed(&files).map_err(|e| error("ERR_OKF_CACHE_INVALID", &guard.supplied, e))?;
+        validate(
+            Index::open(CapturedDirectory::new(files.clone())).map_err(invalid)?,
+            self.documents.clone(),
+            false,
+        )
+        .map_err(|e| error("ERR_OKF_CACHE_INVALID", &guard.supplied, e))?;
         let manifest = Manifest {
             compatibility: COMPATIBILITY.into(),
             documents: self
@@ -363,6 +435,9 @@ thread_local! {
 }
 
 pub(super) fn load(path: &str) -> Result<Option<Engine>> {
+    load_with_storage(path, StorageMode::Memory)
+}
+pub(super) fn load_with_storage(path: &str, mode: StorageMode) -> Result<Option<Engine>> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -393,9 +468,13 @@ pub(super) fn load(path: &str) -> Result<Option<Engine>> {
     file.read_to_end(&mut bytes)
         .map_err(|e| error("ERR_OKF_READ", path, e))?;
     drop(file);
-    decode_cache(&bytes, path).map(Some)
+    decode_cache_with_storage(&bytes, path, mode).map(Some)
 }
+#[cfg(test)]
 fn decode_cache(bytes: &[u8], path: &str) -> Result<Engine> {
+    decode_cache_with_storage(bytes, path, StorageMode::Memory)
+}
+fn decode_cache_with_storage(bytes: &[u8], path: &str, mode: StorageMode) -> Result<Engine> {
     let bad = |message: &str| error("ERR_OKF_CACHE_INVALID", path, message);
     if bytes.len() < 52 || &bytes[..8] != MAGIC {
         return Err(bad("truncated cache or invalid magic"));
@@ -468,7 +547,7 @@ fn decode_cache(bytes: &[u8], path: &str) -> Result<Engine> {
             .checked_add(length)
             .filter(|n| *n <= end)
             .ok_or_else(|| bad("invalid file length"))?;
-        files.insert(name, bytes[offset..next].to_vec());
+        files.insert(name, OwnedBytes::new(bytes[offset..next].to_vec()));
         offset = next;
     }
     if offset != end || !files.contains_key("meta.json") || !files.contains_key(".managed.json") {
@@ -480,16 +559,90 @@ fn decode_cache(bytes: &[u8], path: &str) -> Result<Engine> {
             .into_iter()
             .map(|(id, state)| (id.clone(), state.into_state(id)))
             .collect();
-        restore(&files, documents, true)
+        restore_at_path(&files, documents, true, mode, path)
     }))
     .map_err(|_| bad("index decoder panicked on corrupt data"))?
-    .map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))
 }
-fn restore(
-    files: &BTreeMap<String, Vec<u8>>,
-    mut documents: BTreeMap<String, DocumentState>,
+#[cfg(test)]
+fn restore_with_storage(
+    files: &Files,
+    documents: BTreeMap<String, DocumentState>,
     reconstruct_section_ids: bool,
-) -> std::result::Result<Engine, EngineError> {
+    mode: StorageMode,
+) -> Result<Engine> {
+    restore_at_path(files, documents, reconstruct_section_ids, mode, "<test>")
+}
+fn restore_at_path(
+    files: &Files,
+    documents: BTreeMap<String, DocumentState>,
+    reconstruct_section_ids: bool,
+    mode: StorageMode,
+    path: &str,
+) -> Result<Engine> {
+    validate_managed(files).map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))?;
+    let storage = IndexStorage::new(mode).map_err(|e| {
+        let code = if matches!(e, tantivy::TantivyError::OpenDirectoryError(_)) {
+            "ERR_OKF_READ"
+        } else {
+            "ERR_OKF_WRITE"
+        };
+        error(code, path, e)
+    })?;
+    materialize(files, documents, reconstruct_section_ids, path, storage)
+}
+fn materialize(
+    files: &Files,
+    documents: BTreeMap<String, DocumentState>,
+    reconstruct_section_ids: bool,
+    path: &str,
+    storage: IndexStorage,
+) -> Result<Engine> {
+    let context = match &storage {
+        IndexStorage::Memory(_) => path.to_owned(),
+        IndexStorage::Mmap { workspace, .. } => {
+            format!("{path} (workspace {})", workspace.path().display())
+        }
+    };
+    let directory = storage.directory();
+    for (name, bytes) in files {
+        directory
+            .atomic_write(Path::new(name), bytes)
+            .map_err(|e| error("ERR_OKF_WRITE", &context, format!("{name}: {e}")))?;
+    }
+    let read_error = |e: tantivy::TantivyError| {
+        let code = match &e {
+            tantivy::TantivyError::OpenReadError(
+                tantivy::directory::error::OpenReadError::IoError { .. },
+            )
+            | tantivy::TantivyError::IoError(_) => "ERR_OKF_READ",
+            _ => "ERR_OKF_CACHE_INVALID",
+        };
+        error(code, &context, e)
+    };
+    let index = Index::open(directory).map_err(read_error)?;
+    let (reader, fields, documents) = validate(index.clone(), documents, reconstruct_section_ids)
+        .map_err(|e| match e {
+        EngineError::Tantivy(e) => read_error(e),
+        e => error("ERR_OKF_CACHE_INVALID", &context, e),
+    })?;
+    let writer = index
+        .writer(WRITER_HEAP_BYTES)
+        .map_err(|e| error("ERR_OKF_WRITE", &context, e))?;
+    Ok(Engine {
+        _index: index,
+        storage,
+        reader,
+        writer,
+        fields,
+        documents,
+        poisoned: Mutex::new(None),
+        #[cfg(test)]
+        count_results: Default::default(),
+        #[cfg(test)]
+        query_results: Default::default(),
+    })
+}
+fn validate_managed(files: &Files) -> std::result::Result<(), EngineError> {
     let managed: BTreeSet<String> = serde_json::from_slice(
         files
             .get(".managed.json")
@@ -506,13 +659,13 @@ fn restore(
             "managed file inventory mismatch".into(),
         ));
     }
-    let directory = RamDirectory::create();
-    for (name, bytes) in files {
-        directory
-            .atomic_write(Path::new(name), bytes)
-            .map_err(tantivy::TantivyError::from)?;
-    }
-    let index = Index::open(directory.clone())?;
+    Ok(())
+}
+fn validate(
+    index: Index,
+    mut documents: BTreeMap<String, DocumentState>,
+    reconstruct_section_ids: bool,
+) -> std::result::Result<(IndexReader, Fields, BTreeMap<String, DocumentState>), EngineError> {
     if !index.validate_checksum()?.is_empty() {
         return Err(EngineError::StoredInvariant(
             "Tantivy checksum mismatch".into(),
@@ -640,20 +793,7 @@ fn restore(
         ));
     }
     drop(searcher);
-    let writer = index.writer(WRITER_HEAP_BYTES)?;
-    Ok(Engine {
-        _index: index,
-        ram_directory: directory,
-        reader,
-        writer,
-        fields,
-        documents,
-        poisoned: Mutex::new(None),
-        #[cfg(test)]
-        count_results: Default::default(),
-        #[cfg(test)]
-        query_results: Default::default(),
-    })
+    Ok((reader, fields, documents))
 }
 
 // Walk postings once per identity/filter field, including absent values. Merely
@@ -734,6 +874,7 @@ mod tests {
     }
     fn save(engine: &Engine, path: &str) {
         Snapshot::capture(engine)
+            .unwrap()
             .publish(&WriterGuard::acquire(path).unwrap())
             .unwrap();
     }
@@ -768,13 +909,299 @@ mod tests {
     }
 
     #[test]
+    fn mmap_capture_interleaves_real_merge_and_prior_gc() {
+        use crate::storage::test_directory::{Event, Gate, ObservedDirectory, TIMEOUT};
+        use std::sync::mpsc;
+        let storage = IndexStorage::new(StorageMode::Mmap).unwrap();
+        let observed = ObservedDirectory::new(storage.directory());
+        let hooks = observed.hooks.clone();
+        let mut source = Engine::new_in_directory(vec![], storage, Box::new(observed)).unwrap();
+        source
+            .writer
+            .set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
+        source.ingest(document("first")).unwrap();
+        source.ingest(document("second")).unwrap();
+        source.ingest(document("deleted")).unwrap();
+        source.remove(&document("deleted").document_id).unwrap();
+        let mut commit = source.writer.prepare_commit().unwrap();
+        commit.set_payload("captured payload");
+        commit.commit().unwrap();
+        source.reader.reload().unwrap();
+        let original = inventory(&source);
+        assert!(!source.list_degraded().unwrap().is_empty());
+        let expected_meta = serde_json::to_value(source._index.load_metas().unwrap()).unwrap();
+        let ids = source._index.searchable_segment_ids().unwrap();
+        assert!(ids.len() >= 2);
+        let selected: BTreeSet<_> = source
+            ._index
+            .load_metas()
+            .unwrap()
+            .segments
+            .iter()
+            .flat_map(|s| s.list_files())
+            .collect();
+        source
+            ._index
+            .directory()
+            .atomic_write(Path::new("gc-sentinel"), b"obsolete")
+            .unwrap();
+        let (events_tx, events) = mpsc::channel();
+        let (delete_gate, delete_seen, release_delete) = Gate::new();
+        let (meta_gate, meta_seen, release_meta) = Gate::new();
+        {
+            let mut hooks = hooks.lock();
+            hooks.events = Some(events_tx);
+            hooks.before_sentinel_delete = Some(delete_gate);
+            hooks.before_meta = Some(meta_gate);
+        }
+        let prior_gc = source.writer.garbage_collect_files();
+        delete_seen.recv_timeout(TIMEOUT).unwrap(); // selection completed, META_LOCK released
+        let merging = source.writer.merge(&ids);
+        let reader = source.reader.clone();
+        let index = source._index.clone();
+        let (captured_tx, captured_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let capture = std::thread::spawn(move || {
+            let snapshot = Snapshot::capture_inner(&source, |phase| {
+                captured_tx.send(phase.to_owned()).unwrap();
+                if phase == "selected" {
+                    resume_rx.recv_timeout(TIMEOUT).unwrap();
+                }
+            })
+            .unwrap();
+            (source, snapshot)
+        });
+        assert_eq!(captured_rx.recv_timeout(TIMEOUT).unwrap(), "selected");
+        release_delete.send(()).unwrap();
+        prior_gc.wait().unwrap();
+        meta_seen.recv_timeout(TIMEOUT).unwrap();
+        release_meta.send(()).unwrap();
+        let mut deletes = Vec::new();
+        loop {
+            match events.recv_timeout(TIMEOUT).unwrap() {
+                Event::MetaWritten => break,
+                Event::Delete(path) => deletes.push(path),
+                Event::LockResult(success) => assert!(success),
+                Event::LockAttempt => {}
+            }
+        }
+        // Real metadata publication changed the live generation while capture is paused.
+        assert_ne!(
+            serde_json::to_value(index.load_metas().unwrap()).unwrap(),
+            expected_meta
+        );
+        assert!(
+            selected
+                .iter()
+                .filter(|path| path.extension().is_some_and(|ext| ext == "store"))
+                .all(|path| index.directory().exists(path).unwrap())
+        );
+        assert!(deletes.iter().all(|path| !selected.contains(path)));
+        // Observe GC trying the real lock, but never wait for its acquisition while held.
+        loop {
+            if matches!(events.recv_timeout(TIMEOUT).unwrap(), Event::LockAttempt) {
+                break;
+            }
+        }
+        resume_tx.send(()).unwrap();
+        assert_eq!(captured_rx.recv_timeout(TIMEOUT).unwrap(), "released");
+        let (source, snapshot) = capture.join().unwrap();
+        merging.wait().unwrap();
+        reader.reload().unwrap();
+        source.writer.garbage_collect_files().wait().unwrap();
+        let later_events: Vec<_> = events.try_iter().collect();
+        assert!(
+            later_events
+                .iter()
+                .any(|event| matches!(event, Event::LockResult(true)))
+        );
+        assert!(
+            later_events
+                .iter()
+                .any(|event| matches!(event, Event::Delete(path) if selected.contains(path)))
+        );
+        let files = snapshot.files().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&files["meta.json"]).unwrap(),
+            expected_meta
+        );
+        assert!(matches!(snapshot.payload, SnapshotPayload::Copied(_)));
+        let directory = CapturedDirectory::new(files.clone());
+        for (name, bytes) in &files {
+            assert!(std::ptr::eq(bytes.as_ptr(), directory.files[name].as_ptr()));
+            let read = directory
+                .open_read(Path::new(name))
+                .unwrap()
+                .read_bytes()
+                .unwrap();
+            assert!(std::ptr::eq(bytes.as_ptr(), read.as_ptr()));
+        }
+        let restored =
+            restore_with_storage(&files, snapshot.documents.clone(), false, StorageMode::Mmap)
+                .unwrap();
+        assert_eq!(inventory(&restored), original);
+        assert!(!restored.search("searchable", None).unwrap().is_empty());
+        match &restored.storage {
+            IndexStorage::Mmap {
+                directory,
+                workspace,
+            } => {
+                let paths = directory.get_cache_info().mmapped;
+                assert!(
+                    paths
+                        .iter()
+                        .any(|p| p.extension().is_some_and(|ext| ext == "store"))
+                );
+                assert!(
+                    paths
+                        .iter()
+                        .any(|p| p.extension().is_some_and(|ext| ext == "idx"))
+                );
+                assert!(paths.iter().all(|p| workspace.path().join(p).is_file()));
+            }
+            _ => panic!("not mapped"),
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let path = destination(&temp);
+        let guard = WriterGuard::acquire(&path).unwrap();
+        snapshot.publish(&guard).unwrap();
+        for mode in [StorageMode::Memory, StorageMode::Mmap] {
+            let reopened = load_with_storage(&path, mode).unwrap().unwrap();
+            assert_eq!(inventory(&reopened), original);
+            assert!(!reopened.search("searchable", None).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn mmap_capture_preserves_nondefault_metadata() {
+        let source = Engine::new(vec![]).unwrap();
+        let snapshot = Snapshot::capture(&source).unwrap();
+        let mut files = snapshot.files().unwrap();
+        let mut metadata: serde_json::Value = serde_json::from_slice(&files["meta.json"]).unwrap();
+        metadata["index_settings"]["docstore_blocksize"] = 8192.into();
+        metadata["opstamp"] = 1234.into();
+        metadata["payload"] = "metadata payload".into();
+        files.insert(
+            "meta.json".into(),
+            OwnedBytes::new(serde_json::to_vec(&metadata).unwrap()),
+        );
+        let mapped =
+            restore_with_storage(&files, snapshot.documents, false, StorageMode::Mmap).unwrap();
+        let captured = Snapshot::capture(&mapped).unwrap().files().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&captured["meta.json"]).unwrap(),
+            metadata
+        );
+    }
+
+    #[test]
+    fn mmap_capture_read_failure_releases_protection_and_can_retry() {
+        use crate::storage::test_directory::ObservedDirectory;
+        let storage = IndexStorage::new(StorageMode::Mmap).unwrap();
+        let observed = ObservedDirectory::new(storage.directory());
+        let hooks = observed.hooks.clone();
+        let source =
+            Engine::new_in_directory(vec![document("readable")], storage, Box::new(observed))
+                .unwrap();
+        let name = source._index.load_metas().unwrap().segments[0]
+            .list_files()
+            .into_iter()
+            .find(|path| path.extension().is_some_and(|ext| ext == "store"))
+            .unwrap();
+        hooks.lock().fail_read = Some(name);
+        let failure = Snapshot::capture(&source).err().unwrap();
+        assert_eq!(failure.code, "ERR_OKF_READ");
+        assert!(failure.path.contains("okf-search-mmap-"));
+        source.usable().unwrap();
+        assert!(!source.search("searchable", None).unwrap().is_empty());
+        source.writer.garbage_collect_files().wait().unwrap();
+        Snapshot::capture(&source).unwrap();
+    }
+
+    #[test]
+    fn mmap_partial_materialization_cleans_only_owned_workspace() {
+        let source = engine("source");
+        let snapshot = Snapshot::capture(&source).unwrap();
+        let original = snapshot.files().unwrap();
+        for fail_write in [false, true] {
+            let storage = IndexStorage::new(StorageMode::Mmap).unwrap();
+            let path = match &storage {
+                IndexStorage::Mmap { workspace, .. } => workspace.path().to_owned(),
+                _ => unreachable!(),
+            };
+            let mut files = original.clone();
+            if fail_write {
+                // Force a real OS write failure within our owned extraction directory.
+                std::fs::create_dir(path.join(".managed.json")).unwrap();
+            } else {
+                files.insert(
+                    "meta.json".into(),
+                    OwnedBytes::new(b"invalid metadata".to_vec()),
+                );
+            }
+            let failure = materialize(&files, snapshot.documents.clone(), false, "cache", storage)
+                .err()
+                .unwrap();
+            assert_eq!(
+                failure.code,
+                if fail_write {
+                    "ERR_OKF_WRITE"
+                } else {
+                    "ERR_OKF_CACHE_INVALID"
+                }
+            );
+            assert!(!path.exists());
+            assert!(!source.search("searchable", None).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn mmap_empty_zero_sections_and_required_file_loss() {
+        for (documents, zero_section_document) in [
+            (vec![], false),
+            (vec![], true),
+            (vec![document("searchable")], false),
+        ] {
+            let mut source = Engine::new_with_storage(documents, StorageMode::Mmap).unwrap();
+            if zero_section_document {
+                let mut empty = DocumentState::from(&document("empty"));
+                empty.section_ids.clear();
+                empty.section_count = 0;
+                source.documents.insert(empty.document_id.clone(), empty);
+            }
+            let captured = Snapshot::capture(&source).unwrap();
+            let mut files = captured.files().unwrap();
+            let restored =
+                restore_with_storage(&files, captured.documents.clone(), false, StorageMode::Mmap)
+                    .unwrap();
+            assert_eq!(inventory(&source), inventory(&restored));
+            if let Some(required) = files.keys().find(|name| name.ends_with(".store")).cloned() {
+                files.remove(&required);
+                let names: BTreeSet<_> = files
+                    .keys()
+                    .filter(|name| (*name).as_str() != ".managed.json")
+                    .cloned()
+                    .collect();
+                files.insert(
+                    ".managed.json".into(),
+                    OwnedBytes::new(serde_json::to_vec(&names).unwrap()),
+                );
+                assert!(
+                    restore_with_storage(&files, captured.documents, false, StorageMode::Mmap)
+                        .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn persistence_roundtrip_mutation_diagnostics_and_detached_capture() {
         let temp = tempfile::tempdir().unwrap();
         let path = destination(&temp);
         let mut source = engine("first");
         let original = inventory(&source);
         let guard = WriterGuard::acquire(&path).unwrap();
-        let captured = Snapshot::capture(&source);
+        let captured = Snapshot::capture(&source).unwrap();
         source.ingest(document("second")).unwrap();
         captured.publish(&guard).unwrap();
         drop(guard);
@@ -957,7 +1384,7 @@ mod tests {
         save(&source, &path);
         let original = fs::read(&path).unwrap();
         for mismatch in 0..4 {
-            let mut snapshot = Snapshot::capture(&source);
+            let mut snapshot = Snapshot::capture(&source).unwrap();
             let state = snapshot.documents.values_mut().next().unwrap();
             match mismatch {
                 0 => {
@@ -979,7 +1406,7 @@ mod tests {
 
     // Build a checksum-valid payload without the production save-time validation.
     fn unchecked_cache(source: &Engine) -> Vec<u8> {
-        let snapshot = Snapshot::capture(source);
+        let snapshot = Snapshot::capture(source).unwrap();
         let files = snapshot.files().unwrap();
         let manifest = Manifest {
             compatibility: COMPATIBILITY.into(),
@@ -1079,13 +1506,15 @@ mod tests {
         let original = fs::read(&path).unwrap();
         for failure in 0..3 {
             let guard = WriterGuard::acquire(&path).unwrap();
-            let result = Snapshot::capture(&new).publish_with(&guard, |point| {
-                if point == failure {
-                    Err(std::io::Error::other("injected write/publication failure"))
-                } else {
-                    Ok(())
-                }
-            });
+            let result = Snapshot::capture(&new)
+                .unwrap()
+                .publish_with(&guard, |point| {
+                    if point == failure {
+                        Err(std::io::Error::other("injected write/publication failure"))
+                    } else {
+                        Ok(())
+                    }
+                });
             assert_eq!(result.unwrap_err().code, "ERR_OKF_WRITE");
             assert_eq!(fs::read(&path).unwrap(), original);
             assert_eq!(
@@ -1342,6 +1771,7 @@ mod tests {
                 let engine = if i % 2 == 0 { &new } else { &old };
                 let guard = WriterGuard::acquire(&child_path).unwrap();
                 Snapshot::capture(engine)
+                    .unwrap()
                     .publish_with(&guard, |point| {
                         if point == 2 {
                             child_barrier.wait();
@@ -1390,13 +1820,13 @@ mod tests {
             // Capture through the entire merge, not just its first few moments.
             // Bound retained bytes if a heavily loaded runner stalls the merge.
             while !completed.load(std::sync::atomic::Ordering::Acquire) {
-                snapshots.push_back(Snapshot::capture(&source));
+                snapshots.push_back(Snapshot::capture(&source).unwrap());
                 if snapshots.len() > 128 {
                     snapshots.pop_front();
                 }
                 std::thread::yield_now();
             }
-            snapshots.push_back(Snapshot::capture(&source));
+            snapshots.push_back(Snapshot::capture(&source).unwrap());
             assert!(waiter.join().unwrap().unwrap().is_some());
             source.writer.garbage_collect_files().wait().unwrap();
             for snapshot in snapshots {
@@ -1435,6 +1865,7 @@ mod tests {
         };
         let guard = WriterGuard::acquire(&path).unwrap();
         Snapshot::capture(&engine("child"))
+            .unwrap()
             .publish_with(&guard, |point| {
                 if point == 2 {
                     println!("OKF_CHILD_BEFORE_PUBLISH");
@@ -1508,7 +1939,7 @@ mod tests {
         let guard = WriterGuard::acquire(&path).unwrap();
         let parent = Path::new(&path).parent().unwrap();
         fs::set_permissions(parent, fs::Permissions::from_mode(0o500)).unwrap();
-        let result = Snapshot::capture(&source).publish(&guard);
+        let result = Snapshot::capture(&source).unwrap().publish(&guard);
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(matches!(result, Err(e) if e.code == "ERR_OKF_WRITE"));
         assert_eq!(
@@ -1582,7 +2013,11 @@ mod tests {
             .unwrap();
         let guard = WriterGuard::acquire(&path).unwrap();
         assert_eq!(
-            Snapshot::capture(&old).publish(&guard).unwrap_err().code,
+            Snapshot::capture(&old)
+                .unwrap()
+                .publish(&guard)
+                .unwrap_err()
+                .code,
             "ERR_OKF_WRITE"
         );
         assert_eq!(inventory(&load(&path).unwrap().unwrap()), inventory(&new));

@@ -159,10 +159,11 @@ impl Task for OpenTask {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(native_error)?;
         let engine = Engine::new(documents).map_err(native_error)?;
-        if let Some(guard) = guard {
-            if let Err(e) = crate::persistence::Snapshot::capture(&engine).publish(&guard) {
-                return Ok(Err(e));
-            }
+        if let Some(guard) = guard
+            && let Err(e) = crate::persistence::Snapshot::capture(&engine)
+                .and_then(|snapshot| snapshot.publish(&guard))
+        {
+            return Ok(Err(e));
         }
         Ok(Ok(NativeOkfSearch {
             inner: Mutex::new(engine),

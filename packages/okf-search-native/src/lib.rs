@@ -4,9 +4,11 @@ mod filesystem;
 mod persistence;
 mod preparation;
 mod raw_api;
+mod storage;
 use napi::{Env, bindgen_prelude::Utf16String};
 use preparation::{PreparationError, PreparedEntry};
 use raw_api::{decode, identity, ingest_result, invalid, preparation_error, prepare, snapshot};
+use storage::{IndexStorage, StorageMode};
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -24,7 +26,6 @@ use napi::{Error, Result as NapiResult, Status};
 use napi_derive::napi;
 use parking_lot::Mutex;
 use tantivy::collector::{Count, TopDocs};
-use tantivy::directory::RamDirectory;
 use tantivy::query::{
     BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EnableScoring,
     FastFieldRangeQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery,
@@ -1159,9 +1160,7 @@ thread_local! {
 
 struct Engine {
     _index: Index,
-    // This is a clone of the directory passed to `_index`; RamDirectory clones
-    // share the live file map, so telemetry observes the same files on demand.
-    ram_directory: RamDirectory,
+    storage: IndexStorage,
     reader: IndexReader,
     writer: IndexWriter,
     fields: Fields,
@@ -1175,10 +1174,26 @@ struct Engine {
 
 impl Engine {
     fn new(documents: Vec<PreparedDocument>) -> Result<Self, EngineError> {
+        Self::new_with_storage(documents, StorageMode::Memory)
+    }
+
+    fn new_with_storage(
+        documents: Vec<PreparedDocument>,
+        mode: StorageMode,
+    ) -> Result<Self, EngineError> {
+        let storage = IndexStorage::new(mode)?;
+        let directory = storage.directory();
+        Self::new_in_directory(documents, storage, directory)
+    }
+
+    fn new_in_directory(
+        documents: Vec<PreparedDocument>,
+        storage: IndexStorage,
+        directory: Box<dyn tantivy::directory::Directory>,
+    ) -> Result<Self, EngineError> {
         validate_set(&documents)?;
         let (schema, fields) = schema();
-        let ram_directory = RamDirectory::create();
-        let index = Index::create(ram_directory.clone(), schema, IndexSettings::default())?;
+        let index = Index::create(directory, schema, IndexSettings::default())?;
         index.tokenizers().register(TOKENIZER, analyzer());
         let mut writer = index.writer(WRITER_HEAP_BYTES)?;
         let mut states = BTreeMap::new();
@@ -1194,7 +1209,7 @@ impl Engine {
         reader.reload()?;
         Ok(Self {
             _index: index,
-            ram_directory,
+            storage,
             reader,
             writer,
             fields,
@@ -1423,9 +1438,13 @@ impl Engine {
                 },
             },
             storage: IndexStorageStats {
-                kind: "in-memory-index-files".to_owned(),
+                kind: match &self.storage {
+                    IndexStorage::Memory(_) => "in-memory-index-files",
+                    IndexStorage::Mmap { .. } => "mapped-index-files",
+                }
+                .to_owned(),
                 size_in_bytes: usize_to_js_number(
-                    self.ram_directory.total_mem_usage(),
+                    self.storage.size().map_err(tantivy::TantivyError::from)?,
                     "index file bytes",
                 )?,
             },
@@ -2092,7 +2111,8 @@ impl NativeOkfSearch {
         let path = persistence::path(&path, "path").map_err(|e| preparation_error(&env, e))?;
         let guard =
             persistence::WriterGuard::acquire(&path).map_err(|e| preparation_error(&env, e))?;
-        let snapshot = persistence::Snapshot::capture(&engine);
+        let snapshot =
+            persistence::Snapshot::capture(&engine).map_err(|e| preparation_error(&env, e))?;
         Ok(napi::bindgen_prelude::AsyncTask::new(
             persistence::SaveTask::new(snapshot, guard),
         ))
@@ -2401,7 +2421,7 @@ mod tests {
         assert_eq!(initial.storage.kind, "in-memory-index-files");
         assert_eq!(
             initial.storage.size_in_bytes,
-            engine.ram_directory.total_mem_usage() as f64
+            engine.storage.size().unwrap() as f64
         );
         assert!(initial.storage.size_in_bytes > 0.0);
         assert_eq!(initial.logical.documents.total, 1.0);
@@ -2432,7 +2452,7 @@ mod tests {
         assert_eq!(after_ingest.logical.documents.total, 2.0);
         assert_eq!(
             after_ingest.storage.size_in_bytes,
-            engine.ram_directory.total_mem_usage() as f64
+            engine.storage.size().unwrap() as f64
         );
 
         engine.remove("added").expect("remove should commit");
@@ -2441,7 +2461,7 @@ mod tests {
         assert_eq!(after_remove.logical.documents.degraded, 0.0);
         assert_eq!(
             after_remove.storage.size_in_bytes,
-            engine.ram_directory.total_mem_usage() as f64
+            engine.storage.size().unwrap() as f64
         );
     }
 
