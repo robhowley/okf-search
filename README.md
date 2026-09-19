@@ -2,7 +2,7 @@
 
 Search local [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/open-knowledge-format) Markdown from Pi, Node.js, or a browser.
 
-This monorepo contains a native Rust/Tantivy search backend, the Pi package built on it, and a JavaScript MiniSearch backend for browsers and Node.js. All three build in-memory indexes; no search service is required.
+This monorepo contains a native Rust/Tantivy search backend, the Pi package built on it, and a JavaScript MiniSearch backend for browsers and Node.js. All three build local indexes; the native backend can opt into private mmap backing for root-directory opens. No search service is required.
 
 [![Package validation](https://github.com/robhowley/okf-search/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/robhowley/okf-search/actions/workflows/ci.yml)
 [![okf-search-native on npm](https://img.shields.io/npm/v/okf-search-native?logo=npm&label=okf-search-native)](https://www.npmjs.com/package/okf-search-native)
@@ -45,7 +45,7 @@ console.log({
 });
 ```
 
-`okf-search-native` can also index Markdown already in memory, validate documents, add or replace documents, remove documents from the current index, and accept prepared documents through `okf-search-native/prepared`. See the [native package guide](packages/okf-search-native/README.md) for its complete API and supported platforms.
+`okf-search-native` can also index Markdown already in memory, validate documents, add or replace documents, remove documents from the current index, and accept prepared documents through `okf-search-native/prepared`. Root-directory opens default to memory; pass `{ cachePath, storage: "mmap" }` to opt into a private mapped workspace. Use `try`/`finally` and `await index.close()` for every native handle. See the [native package guide](packages/okf-search-native/README.md) for its complete API, lifecycle, storage costs, and supported platforms.
 
 ## Use the JavaScript backend
 
@@ -105,7 +105,7 @@ pi-okf-search ── okf-search-native ── okf_search tool in Pi
 
 The public backends share the repository's OKF parsing, validation, document preparation, filters, and result model. When given a directory, they recursively load lowercase `.md` files, excluding files named exactly `index.md` and `log.md`. Search returns at most one best-matching section per document, and both strict and degraded OKF documents are searchable by default.
 
-Indexes remain in memory. Adding or removing a document changes the active index, not its source file. Reopening a directory rebuilds the index from disk.
+Indexes remain in memory by default. A native root open can opt into a private mmap workspace, but `cachePath` is required and invalid options or mmap initialization failures never fall back to memory. Adding or removing a document changes the active index, not its source file. Each mapped handle keeps an independent view, so replacing a cache does not refresh another open handle. A later save replaces the whole destination with the handle's captured view, even when that view is stale, and does not merge. Mapped workspaces can contain plaintext index data and use extra temporary disk space; successful `close()` removes them, while uncertain cleanup retains a path for manual removal after verifying no process uses it. Native `indexStats().storage.sizeInBytes` is sampled backing-file size, not RSS. `createOkfSearch` and prepared constructors remain memory-only.
 
 ## Requirements
 

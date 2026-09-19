@@ -225,6 +225,7 @@ assert.deepEqual(index.listTypes(), ["added", "note"]);
 assert.equal(index.remove("./added.md"), true);
 assert.deepEqual(index.search("release-added-needle", { match: "all" }), []);
 assert.throws(() => index.autoSuggest("release"), (error) => error instanceof api.OkfError && error.code === "ERR_OKF_UNSUPPORTED");
+await index.close();
 const fixture = join(process.cwd(), "fixture");
 const source = join(fixture, "nested", "directory.md");
 const before = await readFile(source, "utf8");
@@ -233,6 +234,19 @@ assert.equal(opened.search("release-directory-needle")[0]?.path, "nested/directo
 assert.equal(opened.remove("nested/directory.md"), true);
 assert.deepEqual(opened.search("release-directory-needle"), []);
 assert.equal(await readFile(source, "utf8"), before);
+await opened.close();
+const mappedCache = join(process.cwd(), "mapped-cache", "index.okf");
+const mapped = await api.openOkf(fixture, {
+  cachePath: mappedCache,
+  storage: "mmap",
+});
+try {
+  assert.equal(mapped.indexStats().storage.kind, "mapped-index-files");
+  assert.equal(mapped.search("release-directory-needle")[0]?.path, "nested/directory.md");
+  await mapped.save(mappedCache);
+} finally {
+  await mapped.close();
+}
 `,
       "root.cjs": `const assert = require("node:assert/strict");
 const api = require("okf-search-native");
