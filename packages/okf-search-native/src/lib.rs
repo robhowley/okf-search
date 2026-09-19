@@ -1077,7 +1077,10 @@ fn field_probe(plan: &QueryPlan, fields: &Fields, field: SearchField) -> Box<dyn
 #[derive(Debug, ThisError)]
 enum EngineError {
     #[error("{original}; {cleanup}")]
-    Initialization { original: Box<EngineError>, cleanup: shutdown::ShutdownError },
+    Initialization {
+        original: Box<EngineError>,
+        cleanup: shutdown::ShutdownError,
+    },
     #[error("[ERR_OKF_INVALID_PREPARED_DOCUMENT] {0}")]
     Invalid(String),
     #[error("stored index invariant failed: {0}")]
@@ -1269,7 +1272,19 @@ impl Engine {
             .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
         let workspace = storage.preserve_workspace();
-        let writer = index.writer(WRITER_HEAP_BYTES)?;
+        let writer = index.writer(WRITER_HEAP_BYTES).map_err(|error| {
+            let original = EngineError::Tantivy(error);
+            match &workspace {
+                Some(path) => EngineError::Initialization {
+                    original: Box::new(original),
+                    cleanup: shutdown::ShutdownError {
+                        message: "writer initialization failed; worker shutdown unproven".into(),
+                        workspace: Some(path.clone()),
+                    },
+                },
+                None => original,
+            }
+        })?;
         let mut engine = Self {
             workspace,
             resources: Some(EngineResources {
@@ -1287,15 +1302,15 @@ impl Engine {
             }),
         };
         let initialization = (|| -> Result<(), EngineError> {
-        for document in &documents {
-            add_document(&engine.writer, &engine.fields, document)?;
-            engine
-                .documents
-                .insert(document.document_id.clone(), DocumentState::from(document));
-        }
-        engine.writer.commit()?;
-        engine.reader.reload()?;
-        Ok(())
+            for document in &documents {
+                add_document(&engine.writer, &engine.fields, document)?;
+                engine
+                    .documents
+                    .insert(document.document_id.clone(), DocumentState::from(document));
+            }
+            engine.writer.commit()?;
+            engine.reader.reload()?;
+            Ok(())
         })();
         if let Err(original) = initialization {
             return Err(engine.initialization_error(original));
@@ -2093,12 +2108,17 @@ fn to_hit(
 }
 
 fn native_error(error: EngineError) -> Error {
-    let status = match &error {
+    let mut cause = &error;
+    while let EngineError::Initialization { original, .. } = cause {
+        cause = original;
+    }
+    let status = match cause {
         EngineError::Invalid(_) => Status::InvalidArg,
         EngineError::StoredInvariant(_)
         | EngineError::Poisoned(_)
         | EngineError::UnsafeInteger(_)
-        | EngineError::Tantivy(_) => Status::GenericFailure,
+        | EngineError::Tantivy(_)
+        | EngineError::Initialization { .. } => Status::GenericFailure,
     };
     Error::new(status, error.to_string())
 }

@@ -628,21 +628,27 @@ fn materialize(
     let workspace = storage.preserve_workspace();
     let writer = index
         .writer(WRITER_HEAP_BYTES)
-        .map_err(|e| error("ERR_OKF_WRITE", &context, e))?;
+        .map_err(|e| {
+            let message = match &workspace {
+                Some(path) => format!("{e}; writer initialization failed; worker shutdown unproven; preserved workspace {}", path.display()),
+                None => e.to_string(),
+            };
+            error("ERR_OKF_WRITE", &context, message)
+        })?;
     Ok(Engine {
         workspace,
         resources: Some(crate::EngineResources {
-        _index: index,
-        storage,
-        reader,
-        writer,
-        fields,
-        documents,
-        poisoned: Mutex::new(None),
-        #[cfg(test)]
-        count_results: Default::default(),
-        #[cfg(test)]
-        query_results: Default::default(),
+            _index: index,
+            storage,
+            reader,
+            writer,
+            fields,
+            documents,
+            poisoned: Mutex::new(None),
+            #[cfg(test)]
+            count_results: Default::default(),
+            #[cfg(test)]
+            query_results: Default::default(),
         }),
     })
 }
@@ -798,7 +804,6 @@ fn validate(
     }
     drop(searcher);
     Ok((reader, fields, documents))
-
 }
 
 // Walk postings once per identity/filter field, including absent values. Merely
@@ -1050,6 +1055,7 @@ mod tests {
             IndexStorage::Mmap {
                 directory,
                 workspace,
+                ..
             } => {
                 let paths = directory.get_cache_info().mmapped;
                 assert!(

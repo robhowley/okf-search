@@ -279,7 +279,7 @@ mod tests {
                 .kind(),
             io::ErrorKind::Interrupted
         );
-        assert_eq!(visited, [root.0.clone()]);
+        assert_eq!(visited.as_slice(), std::slice::from_ref(&root.0));
         assert!(candidates.is_empty());
     }
 

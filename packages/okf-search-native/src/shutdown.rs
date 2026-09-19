@@ -26,7 +26,6 @@ impl std::fmt::Display for ShutdownError {
 
 /// Call before creating any writer. A kept path cannot be deleted by unwinding.
 /// Pass the owned path to `finish` even when construction fails.
-#[allow(dead_code)] // Used by the mmap storage integration, not exposed publicly yet.
 pub(crate) fn preserve(workspace: tempfile::TempDir) -> PathBuf {
     workspace.keep()
 }
@@ -169,18 +168,14 @@ mod tests {
 
     #[test]
     fn actual_worker_failure_preserves_workspace_while_another_worker_is_live() {
-        for mode in ["explicit", "partial", "finalizer"] {
+        for mode in ["explicit", "partial", "unassembled", "finalizer"] {
             worker_failure(mode);
         }
     }
 
     fn worker_failure(mode: &'static str) {
-        let workspace = preserve(
-            tempfile::Builder::new()
-                .prefix("okf-shutdown-test-")
-                .tempdir()
-                .unwrap(),
-        );
+        let mut storage = crate::IndexStorage::new(crate::StorageMode::Mmap).unwrap();
+        let workspace = storage.preserve_workspace().unwrap();
         std::fs::write(workspace.join("sentinel"), b"must survive").unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (start_tx, start_rx) = mpsc::channel();
@@ -191,7 +186,10 @@ mod tests {
         let (gone_tx, gone_rx) = mpsc::channel();
         let directory = FailingDirectory {
             _released: Arc::new(DirectoryReleased(gone_tx)),
-            inner: MmapDirectory::open(&workspace).unwrap(),
+            inner: match &storage {
+                crate::IndexStorage::Mmap { directory, .. } => directory.clone(),
+                _ => unreachable!(),
+            },
             started: started_tx,
             start: Arc::new(Mutex::new(start_rx)),
             flushing: flushing_tx,
@@ -217,9 +215,8 @@ mod tests {
         let (done_tx, done_rx) = mpsc::channel();
         let owned_path = workspace.clone();
         let shutdown_thread = std::thread::spawn(move || {
-            let result = if mode == "partial" {
-                // Same helper used when construction owns a live writer but no Engine yet.
-                finish(writer, index, Some(owned_path))
+            let result = if mode == "unassembled" {
+                finish(writer, (index, storage), Some(owned_path)).map_err(|e| e.to_string())
             } else {
                 let mut engine = crate::Engine::new(Vec::new()).unwrap();
                 engine.reader = index
@@ -229,9 +226,23 @@ mod tests {
                     .unwrap();
                 engine.writer = writer;
                 engine._index = index;
+                engine.storage = storage;
                 engine.workspace = Some(owned_path);
                 if mode == "explicit" {
-                    engine.shutdown()
+                    engine.shutdown().map_err(|e| e.to_string())
+                } else if mode == "partial" {
+                    let original =
+                        crate::EngineError::Invalid("original initialization failure".into());
+                    let error = engine.initialization_error(original);
+                    let native = crate::native_error(error);
+                    assert_eq!(native.status, napi::Status::InvalidArg);
+                    assert!(
+                        native
+                            .reason
+                            .contains("[ERR_OKF_INVALID_PREPARED_DOCUMENT]")
+                    );
+                    assert!(native.reason.contains("original initialization failure"));
+                    Err(native.reason)
                 } else {
                     drop(engine);
                     Ok(())
@@ -324,9 +335,13 @@ mod tests {
     #[test]
     fn successful_engine_shutdown_and_finalization_remove_workspace() {
         for explicit in [true, false] {
-            let mut engine = crate::Engine::new(Vec::new()).unwrap();
-            let workspace = preserve(tempfile::tempdir().unwrap());
-            engine.workspace = Some(workspace.clone());
+            let engine =
+                crate::Engine::new_with_storage(Vec::new(), crate::StorageMode::Mmap).unwrap();
+            let workspace = engine.workspace.clone().unwrap();
+            match &engine.storage {
+                crate::IndexStorage::Mmap { temporary, .. } => assert!(temporary.is_none()),
+                _ => panic!("expected mapped storage"),
+            }
             if explicit {
                 engine.shutdown().unwrap();
             } else {

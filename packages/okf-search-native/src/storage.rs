@@ -42,7 +42,11 @@ impl IndexStorage {
     pub(super) fn preserve_workspace(&mut self) -> Option<std::path::PathBuf> {
         match self {
             Self::Memory(_) => None,
-            Self::Mmap { workspace, temporary, .. } => {
+            Self::Mmap {
+                workspace,
+                temporary,
+                ..
+            } => {
                 if let Some(directory) = temporary.take() {
                     crate::shutdown::preserve(directory);
                 }
@@ -203,6 +207,7 @@ pub(super) mod test_directory {
         pub before_meta: Option<Gate>,
         pub before_sentinel_delete: Option<Gate>,
         pub fail_read: Option<PathBuf>,
+        pub fail_meta_after: Option<usize>,
     }
     #[derive(Clone)]
     pub struct ObservedDirectory {
@@ -266,7 +271,16 @@ pub(super) mod test_directory {
         }
         fn atomic_write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
             if path == Path::new("meta.json") {
-                let gate = self.hooks.lock().before_meta.take();
+                let mut hooks = self.hooks.lock();
+                if let Some(remaining) = &mut hooks.fail_meta_after {
+                    if *remaining == 0 {
+                        hooks.fail_meta_after = None;
+                        return Err(io::Error::other("injected initialization commit failure"));
+                    }
+                    *remaining -= 1;
+                }
+                let gate = hooks.before_meta.take();
+                drop(hooks);
                 if let Some(gate) = gate {
                     gate.wait();
                 }
@@ -300,6 +314,29 @@ pub(super) mod test_directory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_mapped_initialization_preserves_original_error_and_cleans_workspace() {
+        let storage = IndexStorage::new(StorageMode::Mmap).unwrap();
+        let path = match &storage {
+            IndexStorage::Mmap { workspace, .. } => workspace.clone(),
+            _ => unreachable!(),
+        };
+        let directory = test_directory::ObservedDirectory::new(storage.directory());
+        // Allow Index::create, then fail the initial commit after Engine owns the writer.
+        directory.hooks.lock().fail_meta_after = Some(1);
+        let error = crate::Engine::new_in_directory(Vec::new(), storage, Box::new(directory))
+            .err()
+            .expect("initialization must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("injected initialization commit failure"),
+            "{error}"
+        );
+        assert!(matches!(error, crate::EngineError::Tantivy(_)));
+        assert!(!path.exists());
+    }
 
     #[test]
     fn mapped_size_samples_only_direct_regular_files() {
