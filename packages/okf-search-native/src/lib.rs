@@ -1,12 +1,16 @@
 #![deny(clippy::all)]
 
 mod filesystem;
+mod lifecycle;
 mod persistence;
 mod preparation;
 mod raw_api;
+mod shutdown;
+mod storage;
 use napi::{Env, bindgen_prelude::Utf16String};
 use preparation::{PreparationError, PreparedEntry};
 use raw_api::{decode, identity, ingest_result, invalid, preparation_error, prepare, snapshot};
+use storage::{IndexStorage, StorageMode};
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -18,13 +22,12 @@ use chrono::{DateTime, Utc};
 use levenshtein_automata::{DFA, Distance, LevenshteinAutomatonBuilder};
 use napi::bindgen_prelude::{
     Either, FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion, KeyFilter,
-    Object, Unknown, ValueType,
+    Object, Unknown, ValidateNapiValue, ValueType,
 };
 use napi::{Error, Result as NapiResult, Status};
 use napi_derive::napi;
 use parking_lot::Mutex;
 use tantivy::collector::{Count, TopDocs};
-use tantivy::directory::RamDirectory;
 use tantivy::query::{
     BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EnableScoring,
     FastFieldRangeQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery,
@@ -251,7 +254,7 @@ pub struct LogicalIndexStats {
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct IndexStorageStats {
-    #[napi(ts_type = "\"in-memory-index-files\"")]
+    #[napi(ts_type = "\"in-memory-index-files\" | \"mapped-index-files\"")]
     pub kind: String,
     #[napi(js_name = "sizeInBytes")]
     pub size_in_bytes: f64,
@@ -1074,6 +1077,11 @@ fn field_probe(plan: &QueryPlan, fields: &Fields, field: SearchField) -> Box<dyn
 
 #[derive(Debug, ThisError)]
 enum EngineError {
+    #[error("{original}; {cleanup}")]
+    Initialization {
+        original: Box<EngineError>,
+        cleanup: shutdown::ShutdownError,
+    },
     #[error("[ERR_OKF_INVALID_PREPARED_DOCUMENT] {0}")]
     Invalid(String),
     #[error("stored index invariant failed: {0}")]
@@ -1082,6 +1090,8 @@ enum EngineError {
     Poisoned(String),
     #[error("[ERR_OKF_NATIVE] {0}")]
     UnsafeInteger(String),
+    #[error("[ERR_OKF_READ] {path}: {cause}")]
+    StorageRead { path: String, cause: String },
     #[error("[ERR_OKF_NATIVE] {0}")]
     Tantivy(#[from] tantivy::TantivyError),
 }
@@ -1158,10 +1168,14 @@ thread_local! {
 }
 
 struct Engine {
+    resources: Option<EngineResources>,
+    // Already kept before starting a writer. Never own an auto-deleting TempDir here.
+    workspace: Option<std::path::PathBuf>,
+}
+
+struct EngineResources {
     _index: Index,
-    // This is a clone of the directory passed to `_index`; RamDirectory clones
-    // share the live file map, so telemetry observes the same files on demand.
-    ram_directory: RamDirectory,
+    storage: IndexStorage,
     reader: IndexReader,
     writer: IndexWriter,
     fields: Fields,
@@ -1173,38 +1187,148 @@ struct Engine {
     query_results: Mutex<std::collections::VecDeque<Result<(), tantivy::TantivyError>>>,
 }
 
+impl std::ops::Deref for Engine {
+    type Target = EngineResources;
+    fn deref(&self) -> &Self::Target {
+        self.resources.as_ref().unwrap()
+    }
+}
+
+impl std::ops::DerefMut for Engine {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.resources.as_mut().unwrap()
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let _ = self.shutdown_owned();
+    }
+}
+
 impl Engine {
+    // HandleState drains accepted saves before consuming the engine here.
+    fn shutdown(mut self) -> Result<(), shutdown::ShutdownError> {
+        self.shutdown_owned()
+    }
+
+    fn shutdown_owned(&mut self) -> Result<(), shutdown::ShutdownError> {
+        let Some(resources) = self.resources.take() else {
+            return Ok(());
+        };
+        let EngineResources {
+            writer,
+            _index,
+            storage,
+            reader,
+            fields,
+            documents,
+            poisoned,
+            #[cfg(test)]
+            count_results,
+            #[cfg(test)]
+            query_results,
+        } = resources;
+        shutdown::finish(
+            writer,
+            (
+                _index,
+                storage,
+                reader,
+                fields,
+                documents,
+                poisoned,
+                #[cfg(test)]
+                count_results,
+                #[cfg(test)]
+                query_results,
+            ),
+            self.workspace.take(),
+        )
+    }
     fn new(documents: Vec<PreparedDocument>) -> Result<Self, EngineError> {
+        Self::new_with_storage(documents, StorageMode::Memory)
+    }
+
+    fn new_with_storage(
+        documents: Vec<PreparedDocument>,
+        mode: StorageMode,
+    ) -> Result<Self, EngineError> {
+        let storage = IndexStorage::new(mode)?;
+        let directory = storage.directory();
+        Self::new_in_directory(documents, storage, directory)
+    }
+
+    fn new_in_directory(
+        documents: Vec<PreparedDocument>,
+        mut storage: IndexStorage,
+        directory: Box<dyn tantivy::directory::Directory>,
+    ) -> Result<Self, EngineError> {
         validate_set(&documents)?;
         let (schema, fields) = schema();
-        let ram_directory = RamDirectory::create();
-        let index = Index::create(ram_directory.clone(), schema, IndexSettings::default())?;
+        let index = Index::create(directory, schema, IndexSettings::default())?;
         index.tokenizers().register(TOKENIZER, analyzer());
-        let mut writer = index.writer(WRITER_HEAP_BYTES)?;
-        let mut states = BTreeMap::new();
-        for document in &documents {
-            add_document(&writer, &fields, document)?;
-            states.insert(document.document_id.clone(), DocumentState::from(document));
-        }
-        writer.commit()?;
+        // Build all non-writer resources first. Once workers exist, Engine owns
+        // every fallible ingestion/commit step and its Drop uses safe shutdown.
         let reader: IndexReader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
-        reader.reload()?;
-        Ok(Self {
-            _index: index,
-            ram_directory,
-            reader,
-            writer,
-            fields,
-            documents: states,
-            poisoned: Mutex::new(None),
-            #[cfg(test)]
-            count_results: std::collections::VecDeque::new(),
-            #[cfg(test)]
-            query_results: Mutex::new(std::collections::VecDeque::new()),
-        })
+        let workspace = storage.preserve_workspace();
+        let writer = index.writer(WRITER_HEAP_BYTES).map_err(|error| {
+            let original = EngineError::Tantivy(error);
+            match &workspace {
+                Some(path) => EngineError::Initialization {
+                    original: Box::new(original),
+                    cleanup: shutdown::ShutdownError {
+                        message: "writer initialization failed; worker shutdown unproven".into(),
+                        workspace: Some(path.clone()),
+                    },
+                },
+                None => original,
+            }
+        })?;
+        let mut engine = Self {
+            workspace,
+            resources: Some(EngineResources {
+                _index: index,
+                storage,
+                reader,
+                writer,
+                fields,
+                documents: BTreeMap::new(),
+                poisoned: Mutex::new(None),
+                #[cfg(test)]
+                count_results: std::collections::VecDeque::new(),
+                #[cfg(test)]
+                query_results: Mutex::new(std::collections::VecDeque::new()),
+            }),
+        };
+        let initialization = (|| -> Result<(), EngineError> {
+            for document in &documents {
+                add_document(&engine.writer, &engine.fields, document)?;
+                engine
+                    .documents
+                    .insert(document.document_id.clone(), DocumentState::from(document));
+            }
+            engine.writer.commit()?;
+            engine.reader.reload()?;
+            Ok(())
+        })();
+        if let Err(original) = initialization {
+            return Err(engine.initialization_error(original));
+        }
+        Ok(engine)
+    }
+
+    fn initialization_error(self, original: EngineError) -> EngineError {
+        match self.shutdown() {
+            Ok(()) => original,
+            Err(cleanup) => EngineError::Initialization {
+                original: Box::new(original),
+                cleanup,
+            },
+        }
     }
 
     fn usable(&self) -> Result<(), EngineError> {
@@ -1355,6 +1479,16 @@ impl Engine {
         let mut machine_confirmed = 0usize;
         let mut human_reviewed = 0usize;
         let mut trust_unclassified = 0usize;
+        let size_in_bytes = self
+            .storage
+            .size()
+            .map_err(|error| EngineError::StorageRead {
+                path: self
+                    .storage
+                    .context_path()
+                    .map_or_else(|| "<index>".to_owned(), |path| path.display().to_string()),
+                cause: error.to_string(),
+            })?;
 
         for state in self.documents.values() {
             match state.conformance.as_str() {
@@ -1423,11 +1557,12 @@ impl Engine {
                 },
             },
             storage: IndexStorageStats {
-                kind: "in-memory-index-files".to_owned(),
-                size_in_bytes: usize_to_js_number(
-                    self.ram_directory.total_mem_usage(),
-                    "index file bytes",
-                )?,
+                kind: match &self.storage {
+                    IndexStorage::Memory(_) => "in-memory-index-files",
+                    IndexStorage::Mmap { .. } => "mapped-index-files",
+                }
+                .to_owned(),
+                size_in_bytes: usize_to_js_number(size_in_bytes, "index file bytes")?,
             },
         })
     }
@@ -1983,12 +2118,18 @@ fn to_hit(
 }
 
 fn native_error(error: EngineError) -> Error {
-    let status = match &error {
+    let mut cause = &error;
+    while let EngineError::Initialization { original, .. } = cause {
+        cause = original;
+    }
+    let status = match cause {
         EngineError::Invalid(_) => Status::InvalidArg,
         EngineError::StoredInvariant(_)
         | EngineError::Poisoned(_)
         | EngineError::UnsafeInteger(_)
-        | EngineError::Tantivy(_) => Status::GenericFailure,
+        | EngineError::StorageRead { .. }
+        | EngineError::Tantivy(_)
+        | EngineError::Initialization { .. } => Status::GenericFailure,
     };
     Error::new(status, error.to_string())
 }
@@ -1996,7 +2137,7 @@ fn native_error(error: EngineError) -> Error {
 /// Native search handle for raw Markdown and the existing prepared-document API.
 #[napi]
 pub struct NativeOkfSearch {
-    inner: Mutex<Engine>,
+    inner: std::sync::Arc<lifecycle::HandleState>,
 }
 
 #[napi]
@@ -2005,47 +2146,82 @@ impl NativeOkfSearch {
     pub fn from_prepared(documents: Vec<PreparedDocument>) -> Result<Self, Error> {
         let engine = Engine::new(documents).map_err(native_error)?;
         Ok(Self {
-            inner: Mutex::new(engine),
+            inner: lifecycle::HandleState::new(engine),
         })
     }
 
     #[napi(js_name = "ingestPrepared")]
-    pub fn ingest_prepared(&self, document: PreparedDocument) -> Result<(), Error> {
-        self.inner.lock().ingest(document).map_err(native_error)
+    pub fn ingest_prepared(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "PreparedDocument")] document: Unknown<'_>,
+    ) -> Result<(), Error> {
+        self.inner.admit()?.usable().map_err(native_error)?;
+        // Generated object conversion executes caller getters. Admit first and
+        // release the lock before conversion, then recheck after reentrant calls.
+        let document = unsafe { PreparedDocument::from_napi_value(env.raw(), document.raw())? };
+        self.inner.admit()?.ingest(document).map_err(native_error)
     }
 
     #[napi(js_name = "removeDocument")]
-    pub fn remove_document(&self, document_id: String) -> Result<bool, Error> {
-        self.inner.lock().remove(&document_id).map_err(native_error)
+    pub fn remove_document(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "string")] document_id: Unknown<'_>,
+    ) -> Result<bool, Error> {
+        self.inner.admit()?.usable().map_err(native_error)?;
+        let document_id = unsafe { String::from_napi_value(env.raw(), document_id.raw())? };
+        self.inner
+            .admit()?
+            .remove(&document_id)
+            .map_err(native_error)
     }
 
     #[napi]
     pub fn search(
         &self,
-        query: String,
-        #[napi(ts_arg_type = "SearchOptions | undefined | null")] options: Option<Object<'_>>,
+        env: Env,
+        #[napi(ts_arg_type = "string")] query: Unknown<'_>,
+        #[napi(ts_arg_type = "SearchOptions | undefined | null")] options: Option<Unknown<'_>>,
     ) -> Result<Vec<SearchHit>, Error> {
         {
-            let engine = self.inner.lock();
+            let engine = self.inner.admit()?;
             engine.usable().map_err(native_error)?;
         }
+        let query = unsafe { String::from_napi_value(env.raw(), query.raw())? };
+        let options = options
+            .map(|value| unsafe {
+                Object::validate(env.raw(), value.raw())?;
+                Object::from_napi_value(env.raw(), value.raw())
+            })
+            .transpose()?;
         let options = parse_search_options(options)?;
-        self.inner.lock().search(&query, options)
+        self.inner.admit()?.search(&query, options)
     }
 
     #[napi(js_name = "indexStats")]
-    pub fn index_stats(&self) -> Result<IndexStats, Error> {
-        self.inner.lock().index_stats().map_err(native_error)
+    pub fn index_stats(&self, env: Env) -> Result<IndexStats, Error> {
+        self.inner
+            .admit()?
+            .index_stats()
+            .map_err(|error| match error {
+                EngineError::StorageRead { path, cause } => {
+                    let mut error = raw_api::invalid("ERR_OKF_READ", &path, None);
+                    error.cause = Some(Box::new(std::io::Error::other(cause)));
+                    raw_api::preparation_error(&env, error)
+                }
+                error => native_error(error),
+            })
     }
 
     #[napi(js_name = "listTypes")]
     pub fn list_types(&self) -> Result<Vec<String>, Error> {
-        self.inner.lock().list_types().map_err(native_error)
+        self.inner.admit()?.list_types().map_err(native_error)
     }
 
     #[napi(js_name = "listDegradedDocuments")]
     pub fn list_degraded_documents(&self) -> Result<Vec<DegradedDocument>, Error> {
-        self.inner.lock().list_degraded().map_err(native_error)
+        self.inner.admit()?.list_degraded().map_err(native_error)
     }
 
     /// Tantivy exposes the pieces needed to build completion, but not the
@@ -2055,10 +2231,12 @@ impl NativeOkfSearch {
     #[napi(js_name = "autoSuggest")]
     pub fn auto_suggest(
         &self,
-        _query: String,
-        _options: Option<SearchOptions>,
+        env: Env,
+        #[napi(ts_arg_type = "string")] _query: Unknown<'_>,
+        #[napi(ts_arg_type = "SearchOptions | undefined | null")] _options: Option<Unknown<'_>>,
     ) -> Result<Vec<Suggestion>, Error> {
-        self.inner.lock().usable().map_err(native_error)?;
+        self.inner.admit()?.usable().map_err(native_error)?;
+        let _query = unsafe { String::from_napi_value(env.raw(), _query.raw())? };
         Err(Error::new(
             Status::GenericFailure,
             "[ERR_OKF_UNSUPPORTED] autoSuggest is not implemented by the Tantivy backend",
@@ -2077,25 +2255,25 @@ impl NativeOkfSearch {
     pub fn open_raw(
         root: Utf16String,
         cache_path: Option<Utf16String>,
+        #[napi(ts_arg_type = "\"memory\" | \"mmap\" | undefined | null")] storage: Option<
+            Utf16String,
+        >,
     ) -> napi::bindgen_prelude::AsyncTask<raw_api::OpenTask> {
-        raw_api::open_raw(root, cache_path)
+        raw_api::open_raw(root, cache_path, storage)
     }
 
     #[napi(ts_return_type = "Promise<void>")]
     pub fn save(
         &self,
         env: Env,
-        path: Utf16String,
-    ) -> Result<napi::bindgen_prelude::AsyncTask<persistence::SaveTask>, Error> {
-        let engine = self.inner.lock();
-        engine.usable().map_err(native_error)?;
-        let path = persistence::path(&path, "path").map_err(|e| preparation_error(&env, e))?;
-        let guard =
-            persistence::WriterGuard::acquire(&path).map_err(|e| preparation_error(&env, e))?;
-        let snapshot = persistence::Snapshot::capture(&engine);
-        Ok(napi::bindgen_prelude::AsyncTask::new(
-            persistence::SaveTask::new(snapshot, guard),
-        ))
+        #[napi(ts_arg_type = "string")] path: Unknown<'_>,
+    ) -> Result<Object<'static>, Error> {
+        self.inner.save(env, path)
+    }
+
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn close(&self, env: Env) -> Result<Object<'static>, Error> {
+        self.inner.close(env)
     }
 
     #[napi(factory, js_name = "fromRaw")]
@@ -2135,30 +2313,43 @@ impl NativeOkfSearch {
 
     #[napi(js_name = "assertUsable")]
     pub fn assert_usable(&self) -> Result<(), Error> {
-        self.inner.lock().usable().map_err(native_error)
+        self.inner.admit()?.usable().map_err(native_error)
     }
 
     #[napi(js_name = "ingestRaw", ts_return_type = "unknown")]
-    pub fn ingest_raw(&self, env: Env, input: Object<'_>) -> Result<Object<'static>, Error> {
-        self.inner.lock().usable().map_err(native_error)?;
+    pub fn ingest_raw(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "object")] input: Unknown<'_>,
+    ) -> Result<Object<'static>, Error> {
+        self.inner.admit()?.usable().map_err(native_error)?;
+        let input = unsafe {
+            Object::validate(env.raw(), input.raw())?;
+            Object::from_napi_value(env.raw(), input.raw())?
+        };
         // No engine lock survives across caller-owned getters.
         let entry = prepare(snapshot(input)?).map_err(|error| preparation_error(&env, error))?;
         let response = ingest_result(&env, &entry)?;
         let path = entry.identity.path.clone();
         let document = entry.into_document().map_err(native_error)?;
         self.inner
-            .lock()
+            .admit()?
             .ingest(document)
             .map_err(|error| raw_api::mutation_error(&env, error, &path))?;
         Ok(response)
     }
 
     #[napi(js_name = "removePath")]
-    pub fn remove_path(&self, env: Env, path: Utf16String) -> Result<bool, Error> {
-        self.inner.lock().usable().map_err(native_error)?;
+    pub fn remove_path(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "string")] path: Unknown<'_>,
+    ) -> Result<bool, Error> {
+        self.inner.admit()?.usable().map_err(native_error)?;
+        let path = unsafe { Utf16String::from_napi_value(env.raw(), path.raw())? };
         let identity = identity(path).map_err(|error| preparation_error(&env, error))?;
         self.inner
-            .lock()
+            .admit()?
             .remove(&identity.document_id)
             .map_err(|error| raw_api::mutation_error(&env, error, &identity.path))
     }
@@ -2167,6 +2358,10 @@ impl NativeOkfSearch {
 #[cfg(feature = "test-fixtures")]
 #[path = "../tests/fixtures/poison.rs"]
 pub mod poison_fixture;
+
+#[cfg(feature = "test-fixtures")]
+#[path = "../tests/fixtures/lifecycle.rs"]
+pub mod lifecycle_fixture;
 
 #[cfg(test)]
 mod tests {
@@ -2394,14 +2589,14 @@ mod tests {
     }
 
     #[test]
-    fn index_stats_samples_the_live_ram_directory_and_tracks_successful_mutations() {
+    fn index_stats_samples_the_live_storage_and_tracks_successful_mutations() {
         let mut engine =
             Engine::new(vec![document(strict_section("first", "needle"))]).expect("baseline");
         let initial = engine.index_stats().expect("initial stats");
         assert_eq!(initial.storage.kind, "in-memory-index-files");
         assert_eq!(
             initial.storage.size_in_bytes,
-            engine.ram_directory.total_mem_usage() as f64
+            engine.storage.size().unwrap() as f64
         );
         assert!(initial.storage.size_in_bytes > 0.0);
         assert_eq!(initial.logical.documents.total, 1.0);
@@ -2432,7 +2627,7 @@ mod tests {
         assert_eq!(after_ingest.logical.documents.total, 2.0);
         assert_eq!(
             after_ingest.storage.size_in_bytes,
-            engine.ram_directory.total_mem_usage() as f64
+            engine.storage.size().unwrap() as f64
         );
 
         engine.remove("added").expect("remove should commit");
@@ -2441,7 +2636,7 @@ mod tests {
         assert_eq!(after_remove.logical.documents.degraded, 0.0);
         assert_eq!(
             after_remove.storage.size_in_bytes,
-            engine.ram_directory.total_mem_usage() as f64
+            engine.storage.size().unwrap() as f64
         );
     }
 
@@ -3804,18 +3999,53 @@ mod tests {
             "healthy needle",
         ))])
         .expect("baseline");
-        add_record_without_title(&mut native.inner.lock());
+        add_record_without_title(&mut native.inner.admit().unwrap());
 
         // JS error projection requires a live Env; the addon fixture test checks
         // these exported methods. Keep the corruption/state transition proof here.
-        assert_napi_unusable(native.inner.lock().search("corruptneedle", None));
-        assert_napi_unusable(native.inner.lock().search("healthy", None));
-        assert_napi_unusable(native.inner.lock().index_stats().map_err(native_error));
-        assert_napi_unusable(native.inner.lock().list_types().map_err(native_error));
-        assert_napi_unusable(native.inner.lock().list_degraded().map_err(native_error));
-        assert_napi_unusable(native.auto_suggest("healthy".to_owned(), None));
-        assert_napi_unusable(native.ingest_prepared(document(strict_section("second", "healthy"))));
-        assert_napi_unusable(native.remove_document("first".to_owned()));
+        assert_napi_unusable(native.inner.admit().unwrap().search("corruptneedle", None));
+        assert_napi_unusable(native.inner.admit().unwrap().search("healthy", None));
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .index_stats()
+                .map_err(native_error),
+        );
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .list_types()
+                .map_err(native_error),
+        );
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .list_degraded()
+                .map_err(native_error),
+        );
+        assert_napi_unusable(native.assert_usable());
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .ingest(document(strict_section("second", "healthy")))
+                .map_err(native_error),
+        );
+        assert_napi_unusable(
+            native
+                .inner
+                .admit()
+                .unwrap()
+                .remove("first")
+                .map_err(native_error),
+        );
     }
 
     #[test]

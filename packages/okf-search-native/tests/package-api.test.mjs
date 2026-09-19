@@ -168,6 +168,7 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
       error.code === "ERR_OKF_UNSUPPORTED" &&
       error.path === "autoSuggest",
   );
+  await index.close();
 
   const prepared = cjsPrepared.NativeOkfSearch.fromPrepared([
     preparedDocument("prepared", "prepared-runtime-marker"),
@@ -187,6 +188,12 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
   assert.deepEqual(prepared.search("prepared-ingest-marker", { match: "all" }), []);
   assert.equal(prepared.removeDocument("prepared-added"), false);
   assert.equal(prepared.removeDocument("missing"), false);
+  await prepared.close();
+  assert.throws(
+    () => prepared.indexStats(),
+    error => error instanceof Error &&
+      error.message.startsWith("[ERR_OKF_INDEX_CLOSED]"),
+  );
 
   const directoryRoot = await mkdtemp(join(tmpdir(), "okf-search-native-package-api-"));
   try {
@@ -215,8 +222,47 @@ test("ESM and CommonJS resolve the root and prepared subpath", async () => {
       directoryIndex.search("friendly-directory-marker", { match: "all" }),
       [],
     );
+    await directoryIndex.close();
   } finally {
     await rm(directoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("public storage modes select mmap, reject invalid options, and do not fall back", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-storage-api-"));
+  const root = join(workspace, "source");
+  const cachePath = join(workspace, "cache", "index.okf");
+  try {
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "source.md"), markdown("note", "storage-api-marker"));
+    const { openOkf, OkfError } = require("okf-search-native");
+    const mapped = await openOkf(root, { cachePath, storage: "mmap" });
+    assert.equal(mapped.indexStats().storage.kind, "mapped-index-files");
+    assert.ok(mapped.indexStats().storage.sizeInBytes > 0);
+    assert.equal(mapped.search("storage-api-marker").length, 1);
+    await mapped.close();
+
+    await assert.rejects(
+      openOkf(root, { storage: "mmap" }),
+      error => error instanceof OkfError &&
+        error.code === "ERR_OKF_FIELD" &&
+        error.path === "<input>" &&
+        error.field === "cachePath",
+    );
+
+    const { NativeOkfSearch } = require("okf-search-native/prepared");
+    await assert.rejects(
+      NativeOkfSearch.openRaw(root, undefined, "mmap"),
+      error => error && error.code === "ERR_OKF_FIELD" &&
+        error.path === "<input>" && error.field === "cachePath",
+    );
+    await assert.rejects(
+      NativeOkfSearch.openRaw(root, cachePath, "disk"),
+      error => error && error.code === "ERR_OKF_FIELD" &&
+        error.path === "<input>" && error.field === "storage",
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 
@@ -439,7 +485,8 @@ test("prepared search option getters can reenter read-only native inventory", as
   });
 });
 
-test("package API persists across fresh processes and preserves cache generations", async () => {
+for (const storage of ["memory", "mmap"]) {
+test(`package API persists across fresh processes and preserves private generations (${storage})`, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-persistence-api-"));
   const sourceRoot = join(workspace, "source");
   const missingRoot = join(workspace, "source-removed");
@@ -456,7 +503,7 @@ test("package API persists across fresh processes and preserves cache generation
     );
 
     const root = require("okf-search-native");
-    const index = await root.openOkf(sourceRoot, { cachePath });
+    const index = await root.openOkf(sourceRoot, { cachePath, storage });
     assert.equal((await stat(cachePath)).isFile(), true);
     assert.equal(index.search("package-persistence-first", { match: "all" }).length, 1);
     assert.ok((await readdir(join(workspace, "nested", "cache")))
@@ -471,6 +518,15 @@ test("package API persists across fresh processes and preserves cache generation
       path: "unsaved.md",
       markdown: markdown("note", "package-persistence-unsaved"),
     });
+    index.ingest({ path: "degraded.md", markdown: "---\ntype: private\nstatus: future\n---\nprivatediagnosticneedle" });
+    const privateView = () => ({
+      hits: index.search("package-persistence-unsaved", { match: "all" }),
+      types: index.listTypes(),
+      diagnostics: index.listDegradedDocuments(),
+      logical: index.indexStats().logical,
+    });
+    const before = privateView();
+    assert.equal(before.diagnostics.length, 1);
     await rm(sourceRoot, { recursive: true, force: true });
 
     const freshReaderScript = `
@@ -478,7 +534,7 @@ test("package API persists across fresh processes and preserves cache generation
       const { openOkf } = require(${JSON.stringify(join(packageRoot, "dist", "index.cjs"))});
       (async () => {
         const index = await openOkf(${JSON.stringify(missingRoot)}, {
-          cachePath: ${JSON.stringify(cachePath)},
+          cachePath: ${JSON.stringify(cachePath)}, storage: ${JSON.stringify(storage)},
         });
         assert.equal(index.search("package-persistence-first", { match: "all" }).length, 1);
         assert.equal(index.search("package-persistence-first", { match: "all" })[0].path, "first.md");
@@ -490,6 +546,7 @@ test("package API persists across fresh processes and preserves cache generation
           markdown: "---\\ntype: child\\n---\\npackage-persistence-child\\n",
         });
         await index.save(${JSON.stringify(cachePath)});
+        await index.close();
       })().catch((error) => {
         console.error(error);
         process.exitCode = 1;
@@ -500,9 +557,53 @@ test("package API persists across fresh processes and preserves cache generation
       timeout: 10_000,
     });
 
-    const afterChild = await root.openOkf(missingRoot, { cachePath });
+    assert.deepEqual(privateView(), before);
+    const afterChild = await root.openOkf(missingRoot, { cachePath, storage });
     assert.equal(afterChild.search("package-persistence-child", { match: "all" }).length, 1);
     assert.equal(afterChild.search("package-persistence-unsaved", { match: "all" }).length, 0);
+
+    await afterChild.close();
+    // Process exit is a publication barrier: C must see each complete B snapshot,
+    // while A keeps its original private reads and inventory throughout.
+    const otherPath = join(workspace, "other.okf");
+    for (let generation = 0; generation < 4; generation++) {
+      await execFileAsync(process.execPath, ["-e", `
+        const { openOkf } = require(${JSON.stringify(join(packageRoot, "dist", "index.cjs"))});
+        (async () => {
+          const index = await openOkf(${JSON.stringify(missingRoot)}, { cachePath: ${JSON.stringify(cachePath)}, storage: ${JSON.stringify(storage)} });
+          index.ingest({ path: "child.md", markdown: ${JSON.stringify(markdown("child", `generation${generation}`))} });
+          await index.save(${JSON.stringify(cachePath)});
+          await index.save(${JSON.stringify(otherPath)});
+          await index.close();
+        })().catch(error => { console.error(error); process.exitCode = 1; });
+      `], { cwd: packageRoot, timeout: 10_000 });
+      await execFileAsync(process.execPath, ["-e", `
+        const assert = require("node:assert/strict");
+        const { openOkf } = require(${JSON.stringify(join(packageRoot, "dist", "index.cjs"))});
+        (async () => {
+          const index = await openOkf(${JSON.stringify(missingRoot)}, { cachePath: ${JSON.stringify(cachePath)}, storage: ${JSON.stringify(storage)} });
+          assert.equal(index.search("generation${generation}").length, 1);
+          assert.equal(index.indexStats().logical.documents.total, 4);
+          assert.equal(index.search("package-persistence-unsaved", { match: "all" }).length, 0);
+          assert.equal(index.listDegradedDocuments().length, 0);
+          await index.close();
+        })().catch(error => { console.error(error); process.exitCode = 1; });
+      `], { cwd: packageRoot, timeout: 10_000 });
+      assert.deepEqual(privateView(), before);
+      assert.equal(index.search(`generation${generation}`).length, 0);
+    }
+    // A stale save replaces the entire destination, even a different archive.
+    for (const destination of [otherPath, cachePath]) {
+      await index.save(destination);
+      const restored = await root.openOkf(missingRoot, { cachePath: destination, storage: storage === "mmap" ? "memory" : "mmap" });
+      assert.equal(restored.search("generation3").length, 0);
+      assert.equal(restored.search("package-persistence-unsaved", { match: "all" }).length, 1);
+      assert.deepEqual(restored.listTypes(), before.types);
+      assert.deepEqual(restored.listDegradedDocuments(), before.diagnostics);
+      assert.deepEqual(restored.indexStats().logical, before.logical);
+      await restored.close();
+    }
+    await index.close();
 
     const bytes = await readFile(cachePath);
     await writeFile(cachePath, bytes.subarray(0, Math.max(1, Math.floor(bytes.length / 2))));
@@ -511,7 +612,7 @@ test("package API persists across fresh processes and preserves cache generation
       const { openOkf } = require(${JSON.stringify(join(packageRoot, "dist", "index.cjs"))});
       (async () => {
         await assert.rejects(
-          openOkf(${JSON.stringify(missingRoot)}, { cachePath: ${JSON.stringify(cachePath)} }),
+          openOkf(${JSON.stringify(missingRoot)}, { cachePath: ${JSON.stringify(cachePath)}, storage: ${JSON.stringify(storage)} }),
           (error) => error && error.code === "ERR_OKF_CACHE_INVALID" &&
             error.path === ${JSON.stringify(cachePath)},
         );
@@ -528,6 +629,8 @@ test("package API persists across fresh processes and preserves cache generation
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+}
 
 test("package API rejects overlapping writers and allows retry", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-busy-api-"));
@@ -551,9 +654,10 @@ test("package API rejects overlapping writers and allows retry", async () => {
     const rejected = results.filter((result) => result.status === "rejected");
     assert.equal(fulfilled.length, 1);
     assert.equal(rejected.length, 1);
-    assert.equal(rejected[0].reason.code, "ERR_OKF_CACHE_BUSY");
-    assert.equal(rejected[0].reason.path, cachePath);
+    assert.equal(rejected[0].reason.code, "ERR_OKF_PERSISTENCE_BUSY");
+    assert.equal(rejected[0].reason.path, "<index>");
     await index.save(cachePath);
+    await index.close();
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -601,24 +705,26 @@ test("public child and worker APIs reject a held writer claim, read the old cach
       clearTimeout(timer);
       lines.close();
     }
-    const script = (busy) => `
+    const script = (busy, storage) => `
       const assert = require("node:assert/strict");
       const { createOkfSearch, openOkf, OkfError } = require("okf-search-native");
       (async () => {
         const cachePath = ${JSON.stringify(cachePath)};
-        const loaded = await openOkf(${JSON.stringify(missingRoot)}, { cachePath });
+        const loaded = await openOkf(${JSON.stringify(missingRoot)}, { cachePath, storage: ${JSON.stringify(storage)} });
         assert.equal(loaded.search("oldgeneration").length, 1);
         const writer = createOkfSearch([{ path: "old.md", markdown: "---\\ntype: note\\n---\\noldgeneration" }]);
         ${busy ? `await assert.rejects(writer.save(cachePath),
           error => error instanceof OkfError && error.code === "ERR_OKF_CACHE_BUSY" && error.path === cachePath);`
           : "await writer.save(cachePath);"}
+        await Promise.all([loaded.close(), writer.close()]);
       })()
     `;
     const runBoth = async (busy) => {
-      await execFileAsync(process.execPath, ["-e", `${script(busy)}.catch(error => { console.error(error); process.exitCode = 1; });`], {
+      for (const storage of ["memory", "mmap"]) {
+      await execFileAsync(process.execPath, ["-e", `${script(busy, storage)}.catch(error => { console.error(error); process.exitCode = 1; });`], {
         cwd: packageRoot, timeout: 10_000,
       });
-      const worker = new Worker(`${script(busy)}.catch(error => { throw error; });`, { eval: true });
+      const worker = new Worker(`${script(busy, storage)}.catch(error => { throw error; });`, { eval: true });
       const timeout = setTimeout(() => { void worker.terminate(); }, 10_000);
       try {
         const [code] = await once(worker, "exit");
@@ -626,6 +732,7 @@ test("public child and worker APIs reject a held writer claim, read the old cach
       } finally {
         clearTimeout(timeout);
         await worker.terminate();
+      }
       }
     };
     await runBoth(true);

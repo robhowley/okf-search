@@ -811,6 +811,9 @@ type ExactErrorCode = Assert<Same<OkfErrorCode,
   | "ERR_OKF_CACHE_BUSY"
   | "ERR_OKF_INDEX_UNUSABLE"
   | "ERR_OKF_UNSUPPORTED"
+  | "ERR_OKF_INDEX_CLOSED"
+  | "ERR_OKF_PERSISTENCE_BUSY"
+  | "ERR_OKF_CLOSE"
 >>;
 type ExactDiagnosticCode = Assert<Same<
   OkfDiagnosticCode,

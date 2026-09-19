@@ -2,8 +2,9 @@
 
 Search [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 Markdown collections at native speed from Node.js, powered by Rust and Tantivy.
-Get the best matching section from each document, with its source path, line
-numbers, and snippet.
+The native backend defaults to in-memory indexes and can opt into private mmap
+backing for root-directory opens. Get the best matching section from each
+document, with its source path, line numbers, and snippet.
 
 ## Install
 
@@ -65,7 +66,8 @@ relevance. See the [complete result shape](https://github.com/robhowley/okf-sear
 
 Without options, `openOkf` reads and indexes the collection in memory. The
 handle does not watch files or write source files. Without a cache, call
-`openOkf` again to pick up source filesystem changes.
+`openOkf` again to pick up source filesystem changes. Close every handle from a
+`finally` block; `close()` releases resources without saving.
 
 To reuse a native snapshot across processes, pass a filesystem `cachePath`:
 
@@ -92,6 +94,25 @@ await index.save(cachePath);
   metadata reports `ERR_OKF_CACHE_INCOMPATIBLE`.
 - **No cache:** without `cachePath`, the handle stays in memory and creates no
   cache artifacts. `cachePath` is a cache-file path, not a Markdown identity.
+- **Mapped mode:** pass `{ cachePath, storage: "mmap" }` to use a private
+  Tantivy `MmapDirectory`. `cachePath` is required, the archive remains an
+  ordinary snapshot file, and invalid options or mmap initialization failures
+  never fall back to memory. Each handle extracts its own private workspace;
+  replacing the archive does not refresh an already-open handle.
+
+For a mapped root open, close the handle explicitly:
+
+```js
+const mapped = await openOkf("./knowledge", {
+  cachePath: "./.cache/knowledge.okf",
+  storage: "mmap",
+});
+try {
+  console.log(mapped.search("rollback deployment"));
+} finally {
+  await mapped.close();
+}
+```
 
 `openOkf` recursively reads lowercase `.md` files, excluding files named exactly
 `index.md` or `log.md`. See the [persistence contract](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#persistence)
@@ -174,12 +195,24 @@ await index.save("./.cache/notes.okf");
 ```
 
 `save` captures one consistent snapshot before returning its promise and
-resolves after atomic publication. Mutations made after capture require another
-save. Concurrent writers to one destination reject with
-`ERR_OKF_CACHE_BUSY`; independent handles are not merged. A failed save does
-not replace a previous complete cache or poison a healthy handle. See the
-[full persistence contract](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#persistence)
-for locking, reader visibility, and filesystem caveats.
+resolves after atomic publication. Mmap capture copies committed Tantivy files
+synchronously on the calling thread, so `save()` can block before its first
+`await`. Mutations made after capture require another save. Concurrent saves on
+one handle reject, and concurrent writers to one destination reject with
+`ERR_OKF_CACHE_BUSY`; independent handles are not merged. A stale handle can
+replace a destination with its older full snapshot. A failed save does not
+replace a previous complete cache or poison a healthy handle. See the [full
+persistence contract](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#persistence)
+for locking, reader visibility, close, and filesystem caveats.
+
+`close()` never saves. If it begins while a save is accepted, it drains that
+save before releasing resources. Save publication and close cleanup have
+independent outcomes. A successful mapped close removes its private temporary
+workspace. If shutdown is uncertain, or removal fails after quiescence,
+`close()` rejects with `ERR_OKF_CLOSE` and reports the retained path. Verify no
+process uses that path before removing it manually. Mapped workspaces can
+contain plaintext index data and use disk space in addition to the portable
+cache and temporary save files.
 
 ## Check documents and handle failures
 
@@ -223,6 +256,11 @@ console.log(index.listTypes());
 console.log(index.listDegradedDocuments());
 ```
 
+`indexStats().storage.sizeInBytes` is a sampled backing-file metric, not RSS.
+For mmap it sums regular files in that handle's private workspace, including
+management, temporary, lock, and obsolete files that are present during the
+scan. It is not an exact committed-generation size or mapped-page count.
+
 ## Performance benchmarks
 
 Measured on 13,692 Markdown documents (59.57 MiB of source text), using the public
@@ -240,6 +278,9 @@ Fuzzy matching is disabled by default; final-term prefix matching remains enable
 | Warm query p99 | 95.64 ms | 2.45 ms |
 | Reported index storage¹ | 200.37 MiB | 80.75 MiB |
 | Median post-open RSS | 2,235 MiB | 527 MiB |
+
+The native benchmark uses the default in-memory backend and makes no mmap
+performance or RSS promise.
 
 ### Fuzzy matching enabled
 
@@ -267,6 +308,7 @@ measurements. Native storage can vary with background merges.
 - [API reference](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md): options, return values, errors, and index statistics.
 - [Prepared API](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#advanced-prepared-api): for applications that already produce prepared documents.
 - [Backend differences](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/API.md#backend-differences): Tantivy ranking differs from `okf-minisearch`; `autoSuggest` is unsupported.
+- Prepared constructors remain memory-only; use the package-root API with `storage: "mmap"` for mapped root-directory opens.
 - [Development](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/DEVELOPMENT.md): local builds, tests, and release artifacts.
 
 ## License

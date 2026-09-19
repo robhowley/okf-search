@@ -164,7 +164,8 @@ usable handle.
 
 Persistence is opt-in. Use `cachePath` when opening a directory and
 `save(path)` when publishing a handle snapshot. These are filesystem paths;
-document `path` values remain logical identities.
+document `path` values remain logical identities. Every handle also exposes
+`close()`, which releases its native resources without saving.
 
 ### Open with a cache
 
@@ -178,8 +179,33 @@ const index = await openOkf("./knowledge", { cachePath });
 `openOkf(root, options?)` accepts:
 
 ```ts
-interface OkfOpenOptions {
-  readonly cachePath?: string;
+type OkfOpenOptions =
+  | {
+      readonly cachePath?: string;
+      readonly storage?: "memory";
+    }
+  | {
+      readonly cachePath: string;
+      readonly storage: "mmap";
+    };
+```
+
+`storage` defaults to `"memory"`. `"mmap"` requires `cachePath` and gives the
+handle a private mapped Tantivy workspace; the portable `.okf` archive is still
+read as ordinary bytes. Invalid storage combinations and mmap initialization
+failures reject with their error and never fall back to memory.
+
+Use a `try`/`finally` around an opt-in mapped handle:
+
+```js
+const index = await openOkf("./knowledge", {
+  cachePath: "./.cache/knowledge.okf",
+  storage: "mmap",
+});
+try {
+  console.log(index.search("rollback deployment"));
+} finally {
+  await index.close();
 }
 ```
 
@@ -189,11 +215,17 @@ interface OkfOpenOptions {
   directories are created, the collection is built from `root`, and the
   complete cache is published before `openOkf` resolves.
 - **Reject:** existing directories, dangling links, corrupt or incompatible
-  files, and other read failures reject instead of triggering a hidden rebuild.
+  files, other read failures, and mmap extraction or mapping failures reject
+  instead of triggering a hidden rebuild or a memory fallback.
 - **Compatibility:** cache metadata records the supported format, schema,
   analyzer, preparation, and Tantivy compatibility revisions. Unsupported
   metadata reports `ERR_OKF_CACHE_INCOMPATIBLE`; damaged contents report
   `ERR_OKF_CACHE_INVALID`.
+
+A mapped cache hit is extracted into a new private workspace for that handle.
+Mapped handles do not share backing files, and replacing the `.okf` archive does
+not refresh an already-open handle. Each handle keeps its own view and its own
+mutations, searches, lists, and logical statistics.
 
 A missing-cache open takes the same sibling writer lock as `save`. If another
 writer holds that destination claim, it rejects with `ERR_OKF_CACHE_BUSY` rather
@@ -220,9 +252,15 @@ await index.save("./.cache/notes.okf");
 ```
 
 - `save` takes a snapshot when called. Later changes need another save.
-- `await save(path)` waits until the cache file has been replaced.
-- Only one save can write a path at a time; others fail with
+  For a mapped handle, copying the committed Tantivy files happens
+  synchronously before `save()` returns its promise, so the call can block on
+  the calling thread.
+- Only one save can be outstanding on a handle, regardless of destination.
+  Destination contention between handles or processes fails with
   `ERR_OKF_CACHE_BUSY`. Separate indexes are not merged.
+- `await save(path)` waits until the complete cache file has been replaced.
+  The handle is not refreshed or retargeted. A handle that is stale relative to
+  a destination can replace that destination with its older full snapshot.
 - If saving fails, the old cache and a healthy index remain usable.
 
 ### Cache files and safety
@@ -237,6 +275,41 @@ Saving also creates files beside the cache:
   loading or copying the cache does not require it.
 - Temporary files are normally removed. If the process is killed, they may
   need manual cleanup.
+
+Mapped handles additionally use a unique `okf-search-mmap-*` directory under
+the operating system's temporary directory. It contains extracted Tantivy
+files, which can include searchable or stored document text in plaintext, so
+mapped mode uses extra disk space in addition to the portable archive and save
+temporary files. The workspace is not configurable or shared between handles.
+A successful explicit `close()` removes the workspace. If shutdown is
+uncertain, or a proven-quiescent removal fails, `close()` rejects with
+`ERR_OKF_CLOSE` and reports the surviving workspace path. Do not remove that
+path until you have verified that no process still uses it, then clean it up
+manually. The package does not sweep retained workspaces.
+
+### Close a handle
+
+`close()` stops new operations immediately, never saves, and releases the
+handle's resources. If an accepted `save()` is pending, close waits for that
+publication to settle before teardown. The save result remains the publication
+result and the close result reports resource shutdown, so a successful save
+does not imply a successful close, and a successful close does not imply a
+save. A failed save does not prevent a later close attempt from releasing the
+handle.
+
+Call it from `finally` for every handle, especially mapped handles:
+
+```js
+const index = await openOkf("./knowledge", {
+  cachePath: "./.cache/knowledge.okf",
+  storage: "mmap",
+});
+try {
+  // Search and mutate the private view.
+} finally {
+  await index.close();
+}
+```
 
 ## Validation and failures
 
@@ -366,19 +439,30 @@ detached, recursively frozen snapshot from a package-root handle:
       unclassified: number;
     };
   };
-  storage: {
-    kind: "in-memory-index-files";
-    sizeInBytes: number;
-  };
+  storage:
+    | {
+        kind: "in-memory-index-files";
+        sizeInBytes: number;
+      }
+    | {
+        kind: "mapped-index-files";
+        sizeInBytes: number;
+      };
 }
 ```
 
+Logical values count documents, not sections, and change only after a successful
+`ingest` or `remove`. `types` preserves case and is sorted by type. Missing
+effective status or trust-tier metadata counts as `unclassified`.
 
-Logical values count documents, not sections, and change only after a
-successful `ingest` or `remove`. `types` preserves case and is sorted by type.
-Missing effective status or trust-tier metadata counts as `unclassified`.
-`sizeInBytes` samples the handle's Tantivy `RamDirectory`; it excludes other
-process memory and can change without a logical change.
+`sizeInBytes` is a sampled backing-size metric, not a memory or RSS
+measurement. Memory mode samples Tantivy's `RamDirectory`. Mmap mode sums
+regular files directly in that handle's private workspace during one scan,
+including management, lock, temporary, and obsolete files still present. It
+does not recurse or follow symlinks. Entries that vanish before metadata is
+read are skipped; other scan failures report `ERR_OKF_READ`. Neither value is
+an exact committed-generation size, mapped page count, archive size,
+allocated-block count, or process RSS.
 
 ## Advanced: prepared API
 
@@ -400,8 +484,10 @@ index.removeDocument("docs/old"); // takes a document ID, not a path
 complete DTO declarations are published in [`native.d.cts`](https://github.com/robhowley/okf-search/blob/main/packages/okf-search-native/native.d.cts) and
 are exported from `okf-search-native/prepared`, not from the package root.
 `ingestPrepared` returns `void`; `removeDocument` returns whether the document
-ID was present. The prepared API's `indexStats()` has the same shape above but
-returns a mutable N-API DTO; the package-root adapter returns the frozen copy.
+ID was present. Prepared constructors are memory-only and do not accept mmap
+storage options, but their handles still expose `close()`. The prepared API's
+`indexStats()` has the same shape above but returns a mutable N-API DTO; the
+package-root adapter returns the frozen copy.
 
 ## Backend differences
 

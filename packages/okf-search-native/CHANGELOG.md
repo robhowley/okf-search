@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+* **okf-search-native:** add opt-in private mmap-backed root indexes. Mmap
+  requires `cachePath`, keeps per-handle views, and reports sampled private file
+  backing rather than RSS.
+* **okf-search-native:** add non-saving `close()` to all native handles, with
+  save and close reporting independent publication and cleanup outcomes.
+
 ## [0.7.1](https://github.com/robhowley/okf-search/compare/okf-search-native-v0.7.0...okf-search-native-v0.7.1) (2026-09-18)
 
 
