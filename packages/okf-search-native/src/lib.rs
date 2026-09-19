@@ -4,6 +4,7 @@ mod filesystem;
 mod persistence;
 mod preparation;
 mod raw_api;
+mod shutdown;
 mod storage;
 use napi::{Env, bindgen_prelude::Utf16String};
 use preparation::{PreparationError, PreparedEntry};
@@ -1075,6 +1076,8 @@ fn field_probe(plan: &QueryPlan, fields: &Fields, field: SearchField) -> Box<dyn
 
 #[derive(Debug, ThisError)]
 enum EngineError {
+    #[error("{original}; {cleanup}")]
+    Initialization { original: Box<EngineError>, cleanup: shutdown::ShutdownError },
     #[error("[ERR_OKF_INVALID_PREPARED_DOCUMENT] {0}")]
     Invalid(String),
     #[error("stored index invariant failed: {0}")]
@@ -1159,6 +1162,12 @@ thread_local! {
 }
 
 struct Engine {
+    resources: Option<EngineResources>,
+    // Already kept before starting a writer. Never own an auto-deleting TempDir here.
+    workspace: Option<std::path::PathBuf>,
+}
+
+struct EngineResources {
     _index: Index,
     storage: IndexStorage,
     reader: IndexReader,
@@ -1172,7 +1181,65 @@ struct Engine {
     query_results: Mutex<std::collections::VecDeque<Result<(), tantivy::TantivyError>>>,
 }
 
+impl std::ops::Deref for Engine {
+    type Target = EngineResources;
+    fn deref(&self) -> &Self::Target {
+        self.resources.as_ref().unwrap()
+    }
+}
+
+impl std::ops::DerefMut for Engine {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.resources.as_mut().unwrap()
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let _ = self.shutdown_owned();
+    }
+}
+
 impl Engine {
+    // Public close is wired in the next phase; finalization already uses the same path.
+    fn shutdown(mut self) -> Result<(), shutdown::ShutdownError> {
+        self.shutdown_owned()
+    }
+
+    fn shutdown_owned(&mut self) -> Result<(), shutdown::ShutdownError> {
+        let Some(resources) = self.resources.take() else {
+            return Ok(());
+        };
+        let EngineResources {
+            writer,
+            _index,
+            storage,
+            reader,
+            fields,
+            documents,
+            poisoned,
+            #[cfg(test)]
+            count_results,
+            #[cfg(test)]
+            query_results,
+        } = resources;
+        shutdown::finish(
+            writer,
+            (
+                _index,
+                storage,
+                reader,
+                fields,
+                documents,
+                poisoned,
+                #[cfg(test)]
+                count_results,
+                #[cfg(test)]
+                query_results,
+            ),
+            self.workspace.take(),
+        )
+    }
     fn new(documents: Vec<PreparedDocument>) -> Result<Self, EngineError> {
         Self::new_with_storage(documents, StorageMode::Memory)
     }
@@ -1188,38 +1255,62 @@ impl Engine {
 
     fn new_in_directory(
         documents: Vec<PreparedDocument>,
-        storage: IndexStorage,
+        mut storage: IndexStorage,
         directory: Box<dyn tantivy::directory::Directory>,
     ) -> Result<Self, EngineError> {
         validate_set(&documents)?;
         let (schema, fields) = schema();
         let index = Index::create(directory, schema, IndexSettings::default())?;
         index.tokenizers().register(TOKENIZER, analyzer());
-        let mut writer = index.writer(WRITER_HEAP_BYTES)?;
-        let mut states = BTreeMap::new();
-        for document in &documents {
-            add_document(&writer, &fields, document)?;
-            states.insert(document.document_id.clone(), DocumentState::from(document));
-        }
-        writer.commit()?;
+        // Build all non-writer resources first. Once workers exist, Engine owns
+        // every fallible ingestion/commit step and its Drop uses safe shutdown.
         let reader: IndexReader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
-        reader.reload()?;
-        Ok(Self {
-            _index: index,
-            storage,
-            reader,
-            writer,
-            fields,
-            documents: states,
-            poisoned: Mutex::new(None),
-            #[cfg(test)]
-            count_results: std::collections::VecDeque::new(),
-            #[cfg(test)]
-            query_results: Mutex::new(std::collections::VecDeque::new()),
-        })
+        let workspace = storage.preserve_workspace();
+        let writer = index.writer(WRITER_HEAP_BYTES)?;
+        let mut engine = Self {
+            workspace,
+            resources: Some(EngineResources {
+                _index: index,
+                storage,
+                reader,
+                writer,
+                fields,
+                documents: BTreeMap::new(),
+                poisoned: Mutex::new(None),
+                #[cfg(test)]
+                count_results: std::collections::VecDeque::new(),
+                #[cfg(test)]
+                query_results: Mutex::new(std::collections::VecDeque::new()),
+            }),
+        };
+        let initialization = (|| -> Result<(), EngineError> {
+        for document in &documents {
+            add_document(&engine.writer, &engine.fields, document)?;
+            engine
+                .documents
+                .insert(document.document_id.clone(), DocumentState::from(document));
+        }
+        engine.writer.commit()?;
+        engine.reader.reload()?;
+        Ok(())
+        })();
+        if let Err(original) = initialization {
+            return Err(engine.initialization_error(original));
+        }
+        Ok(engine)
+    }
+
+    fn initialization_error(self, original: EngineError) -> EngineError {
+        match self.shutdown() {
+            Ok(()) => original,
+            Err(cleanup) => EngineError::Initialization {
+                original: Box::new(original),
+                cleanup,
+            },
+        }
     }
 
     fn usable(&self) -> Result<(), EngineError> {
@@ -2414,7 +2505,7 @@ mod tests {
     }
 
     #[test]
-    fn index_stats_samples_the_live_ram_directory_and_tracks_successful_mutations() {
+    fn index_stats_samples_the_live_storage_and_tracks_successful_mutations() {
         let mut engine =
             Engine::new(vec![document(strict_section("first", "needle"))]).expect("baseline");
         let initial = engine.index_stats().expect("initial stats");

@@ -251,7 +251,7 @@ impl Snapshot {
         .map_err(|e| {
             let context = match &engine.storage {
                 IndexStorage::Memory(_) => "<memory>".into(),
-                IndexStorage::Mmap { workspace, .. } => workspace.path().display().to_string(),
+                IndexStorage::Mmap { workspace, .. } => workspace.as_path().display().to_string(),
             };
             error("ERR_OKF_READ", &context, e)
         })
@@ -595,12 +595,12 @@ fn materialize(
     documents: BTreeMap<String, DocumentState>,
     reconstruct_section_ids: bool,
     path: &str,
-    storage: IndexStorage,
+    mut storage: IndexStorage,
 ) -> Result<Engine> {
     let context = match &storage {
         IndexStorage::Memory(_) => path.to_owned(),
         IndexStorage::Mmap { workspace, .. } => {
-            format!("{path} (workspace {})", workspace.path().display())
+            format!("{path} (workspace {})", workspace.as_path().display())
         }
     };
     let directory = storage.directory();
@@ -625,10 +625,13 @@ fn materialize(
         EngineError::Tantivy(e) => read_error(e),
         e => error("ERR_OKF_CACHE_INVALID", &context, e),
     })?;
+    let workspace = storage.preserve_workspace();
     let writer = index
         .writer(WRITER_HEAP_BYTES)
         .map_err(|e| error("ERR_OKF_WRITE", &context, e))?;
     Ok(Engine {
+        workspace,
+        resources: Some(crate::EngineResources {
         _index: index,
         storage,
         reader,
@@ -640,6 +643,7 @@ fn materialize(
         count_results: Default::default(),
         #[cfg(test)]
         query_results: Default::default(),
+        }),
     })
 }
 fn validate_managed(files: &Files) -> std::result::Result<(), EngineError> {
@@ -794,6 +798,7 @@ fn validate(
     }
     drop(searcher);
     Ok((reader, fields, documents))
+
 }
 
 // Walk postings once per identity/filter field, including absent values. Merely
@@ -1057,7 +1062,7 @@ mod tests {
                         .iter()
                         .any(|p| p.extension().is_some_and(|ext| ext == "idx"))
                 );
-                assert!(paths.iter().all(|p| workspace.path().join(p).is_file()));
+                assert!(paths.iter().all(|p| workspace.as_path().join(p).is_file()));
             }
             _ => panic!("not mapped"),
         }
@@ -1126,7 +1131,7 @@ mod tests {
         for fail_write in [false, true] {
             let storage = IndexStorage::new(StorageMode::Mmap).unwrap();
             let path = match &storage {
-                IndexStorage::Mmap { workspace, .. } => workspace.path().to_owned(),
+                IndexStorage::Mmap { workspace, .. } => workspace.as_path().to_owned(),
                 _ => unreachable!(),
             };
             let mut files = original.clone();

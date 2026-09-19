@@ -13,7 +13,8 @@ pub(super) enum IndexStorage {
     Memory(RamDirectory),
     Mmap {
         directory: MmapDirectory,
-        workspace: tempfile::TempDir,
+        workspace: std::path::PathBuf,
+        temporary: Option<tempfile::TempDir>,
     },
 }
 impl IndexStorage {
@@ -32,10 +33,22 @@ impl IndexStorage {
                 let directory = MmapDirectory::open(workspace.path())?;
                 Self::Mmap {
                     directory,
-                    workspace,
+                    workspace: workspace.path().to_owned(),
+                    temporary: Some(workspace),
                 }
             }
         })
+    }
+    pub(super) fn preserve_workspace(&mut self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Memory(_) => None,
+            Self::Mmap { workspace, temporary, .. } => {
+                if let Some(directory) = temporary.take() {
+                    crate::shutdown::preserve(directory);
+                }
+                Some(workspace.clone())
+            }
+        }
     }
     pub(super) fn directory(&self) -> Box<dyn Directory> {
         match self {
@@ -49,9 +62,9 @@ impl IndexStorage {
             Self::Mmap { workspace, .. } => {
                 let mut size = 0;
                 let context = |e: io::Error| {
-                    io::Error::new(e.kind(), format!("{}: {e}", workspace.path().display()))
+                    io::Error::new(e.kind(), format!("{}: {e}", workspace.as_path().display()))
                 };
-                for entry in std::fs::read_dir(workspace.path()).map_err(context)? {
+                for entry in std::fs::read_dir(workspace.as_path()).map_err(context)? {
                     let entry = entry.map_err(context)?;
                     let metadata = match std::fs::symlink_metadata(entry.path()) {
                         Ok(metadata) => metadata,
@@ -295,15 +308,15 @@ mod tests {
             unreachable!()
         };
         let initial = storage.size().unwrap();
-        std::fs::write(workspace.path().join("obsolete"), b"12345").unwrap();
-        std::fs::write(workspace.path().join(".lock"), b"123").unwrap();
-        std::fs::create_dir(workspace.path().join("nested")).unwrap();
-        std::fs::write(workspace.path().join("nested/ignored"), b"123456789").unwrap();
+        std::fs::write(workspace.as_path().join("obsolete"), b"12345").unwrap();
+        std::fs::write(workspace.as_path().join(".lock"), b"123").unwrap();
+        std::fs::create_dir(workspace.as_path().join("nested")).unwrap();
+        std::fs::write(workspace.as_path().join("nested/ignored"), b"123456789").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::{PermissionsExt, symlink};
             assert_eq!(
-                std::fs::metadata(workspace.path())
+                std::fs::metadata(workspace.as_path())
                     .unwrap()
                     .permissions()
                     .mode()
@@ -311,13 +324,13 @@ mod tests {
                 0
             );
             symlink(
-                workspace.path().join("obsolete"),
-                workspace.path().join("ignored-link"),
+                workspace.as_path().join("obsolete"),
+                workspace.as_path().join("ignored-link"),
             )
             .unwrap();
         }
         assert_eq!(storage.size().unwrap(), initial + 8);
-        std::fs::remove_dir_all(workspace.path()).unwrap();
+        std::fs::remove_dir_all(workspace.as_path()).unwrap();
         assert!(
             storage
                 .size()
