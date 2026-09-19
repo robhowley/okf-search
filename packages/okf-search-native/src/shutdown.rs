@@ -290,10 +290,10 @@ mod tests {
     }
 
     #[test]
-    fn resources_are_released_before_removal_and_release_panic_retains_backing() {
+    fn resources_are_released_before_removal_and_failures_report_retained_path() {
         struct Release {
             path: PathBuf,
-            panic: bool,
+            failure: &'static str,
         }
         impl Drop for Release {
             fn drop(&mut self) {
@@ -301,10 +301,16 @@ mod tests {
                     self.path.exists(),
                     "workspace removed before releasing mappings"
                 );
-                assert!(!self.panic, "injected release panic");
+                assert_ne!(self.failure, "panic", "injected release panic");
+                if self.failure == "removal" {
+                    // All mappings have dropped. Replace the directory with a file
+                    // so remove_dir_all fails on every platform without permissions.
+                    std::fs::remove_dir_all(&self.path).unwrap();
+                    std::fs::write(&self.path, b"removal obstruction").unwrap();
+                }
             }
         }
-        for panic in [false, true] {
+        for failure in ["none", "panic", "removal"] {
             let path = preserve(tempfile::tempdir().unwrap());
             let directory = MmapDirectory::open(&path).unwrap();
             let index = Index::create(
@@ -323,15 +329,23 @@ mod tests {
                     directory,
                     Release {
                         path: path.clone(),
-                        panic,
+                        failure,
                     },
                 ),
                 Some(path.clone()),
             );
-            assert_eq!(result.is_err(), panic);
-            assert_eq!(path.exists(), panic);
-            if panic {
-                std::fs::remove_dir_all(path).unwrap();
+            assert_eq!(result.is_err(), failure != "none");
+            assert_eq!(path.exists(), failure != "none");
+            if let Err(error) = result {
+                assert_eq!(error.workspace.as_ref(), Some(&path));
+                assert!(error.to_string().contains("ERR_OKF_CLOSE"));
+                assert!(error.to_string().contains(path.to_str().unwrap()));
+                if failure == "removal" {
+                    assert!(error.message.contains("workspace removal failed"));
+                    std::fs::remove_file(path).unwrap();
+                } else {
+                    std::fs::remove_dir_all(path).unwrap();
+                }
             }
         }
     }

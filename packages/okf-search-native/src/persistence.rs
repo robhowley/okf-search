@@ -1487,35 +1487,38 @@ mod tests {
 
     #[test]
     fn persistence_faults_preserve_old_generation_and_clean_owned_temporary() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = destination(&temp);
-        let old = engine("old");
-        let new = engine("new");
-        save(&old, &path);
-        let original = fs::read(&path).unwrap();
-        for failure in 0..3 {
-            let guard = WriterGuard::acquire(&path).unwrap();
-            let result = Snapshot::capture(&new)
-                .unwrap()
-                .publish_with(&guard, |point| {
-                    if point == failure {
-                        Err(std::io::Error::other("injected write/publication failure"))
-                    } else {
-                        Ok(())
-                    }
-                });
-            assert_eq!(result.unwrap_err().code, "ERR_OKF_WRITE");
-            assert_eq!(fs::read(&path).unwrap(), original);
-            assert_eq!(
-                fs::read_dir(Path::new(&path).parent().unwrap())
+        for mode in [StorageMode::Memory, StorageMode::Mmap] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = destination(&temp);
+            let old = engine("old");
+            let new = Engine::new_with_storage(vec![document("new")], mode).unwrap();
+            save(&old, &path);
+            let original = fs::read(&path).unwrap();
+            for failure in 0..3 {
+                let guard = WriterGuard::acquire(&path).unwrap();
+                let result = Snapshot::capture(&new)
                     .unwrap()
-                    .count(),
-                2
-            );
-            assert_eq!(inventory(&load(&path).unwrap().unwrap()), inventory(&old));
-            new.usable().unwrap();
+                    .publish_with(&guard, |point| {
+                        if point == failure {
+                            Err(std::io::Error::other("injected write/publication failure"))
+                        } else {
+                            Ok(())
+                        }
+                    });
+                assert_eq!(result.unwrap_err().code, "ERR_OKF_WRITE");
+                assert_eq!(fs::read(&path).unwrap(), original);
+                assert_eq!(
+                    fs::read_dir(Path::new(&path).parent().unwrap())
+                        .unwrap()
+                        .count(),
+                    2
+                );
+                assert_eq!(inventory(&load(&path).unwrap().unwrap()), inventory(&old));
+                new.usable().unwrap();
+            }
+            save(&new, &path);
+            new.shutdown().unwrap();
         }
-        save(&new, &path);
     }
 
     #[test]
@@ -1772,12 +1775,58 @@ mod tests {
         });
         for _ in 0..12 {
             barrier.wait();
-            for _ in 0..3 {
-                let state = inventory(&load(&path).unwrap().unwrap());
-                assert!(state == old_inventory || state == new_inventory);
+            for mode in [StorageMode::Memory, StorageMode::Mmap] {
+                for _ in 0..3 {
+                    let reader = load_with_storage(&path, mode).unwrap().unwrap();
+                    let state = inventory(&reader);
+                    assert!(state == old_inventory || state == new_inventory);
+                    reader.shutdown().unwrap();
+                }
             }
         }
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn repeated_close_drains_active_mapped_merges_and_removes_only_owned_workspace() {
+        use crate::storage::test_directory::{Gate, ObservedDirectory, TIMEOUT};
+        use std::sync::mpsc;
+        let other = Engine::new_with_storage(vec![document("other")], StorageMode::Mmap).unwrap();
+        let other_path = other.workspace.clone().unwrap();
+        for round in 0..6 {
+            let storage = IndexStorage::new(StorageMode::Mmap).unwrap();
+            let observed = ObservedDirectory::new(storage.directory());
+            let hooks = observed.hooks.clone();
+            let mut source = Engine::new_in_directory(vec![], storage, Box::new(observed)).unwrap();
+            let workspace = source.workspace.clone().unwrap();
+            source
+                .writer
+                .set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
+            for i in 0..4 {
+                source
+                    .ingest(document(&format!("round{round}-doc{i}")))
+                    .unwrap();
+            }
+            let ids = source._index.searchable_segment_ids().unwrap();
+            assert!(ids.len() > 1);
+            let (gate, reached, release) = Gate::new();
+            hooks.lock().before_meta = Some(gate);
+            let merging = source.writer.merge(&ids);
+            reached.recv_timeout(TIMEOUT).unwrap();
+            let (done_tx, done_rx) = mpsc::channel();
+            let close = std::thread::spawn(move || done_tx.send(source.shutdown()).unwrap());
+            assert!(done_rx.try_recv().is_err());
+            assert!(workspace.exists());
+            release.send(()).unwrap();
+            assert!(merging.wait().unwrap().is_some());
+            done_rx.recv_timeout(TIMEOUT).unwrap().unwrap();
+            close.join().unwrap();
+            assert!(!workspace.exists());
+            assert!(other_path.exists());
+            assert!(!other.search("persistence", None).unwrap().is_empty());
+        }
+        other.shutdown().unwrap();
+        assert!(!other_path.exists());
     }
 
     #[test]
@@ -1986,8 +2035,14 @@ mod tests {
         let old = engine("old");
         let new = engine("new");
         save(&old, &path);
+        let mapped = load_with_storage(&path, StorageMode::Mmap)
+            .unwrap()
+            .unwrap();
+        let mapped_path = mapped.workspace.clone().unwrap();
         let mut cooperating = File::open(&path).unwrap();
         save(&new, &path);
+        assert_eq!(inventory(&mapped), inventory(&old));
+        assert!(!mapped.search("old", None).unwrap().is_empty());
         let mut old_bytes = Vec::new();
         cooperating.read_to_end(&mut old_bytes).unwrap();
         assert_eq!(
@@ -2000,6 +2055,7 @@ mod tests {
             .share_mode(1 | 2)
             .open(&path)
             .unwrap();
+        let prior_bytes = fs::read(&path).unwrap();
         let guard = WriterGuard::acquire(&path).unwrap();
         assert_eq!(
             Snapshot::capture(&old)
@@ -2009,9 +2065,13 @@ mod tests {
                 .code,
             "ERR_OKF_WRITE"
         );
+        assert_eq!(fs::read(&path).unwrap(), prior_bytes);
         assert_eq!(inventory(&load(&path).unwrap().unwrap()), inventory(&new));
+        assert_eq!(inventory(&mapped), inventory(&old));
         drop(denied);
         drop(guard);
         save(&old, &path);
+        mapped.shutdown().unwrap();
+        assert!(!mapped_path.exists());
     }
 }

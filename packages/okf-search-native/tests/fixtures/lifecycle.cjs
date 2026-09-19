@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
+const { fork } = require('node:child_process');
+const { once } = require('node:events');
 const addon = process.argv[2];
 const root = process.argv[3];
 const { NativeOkfSearch: Native, lifecycleFixture: hook, lifecycleMappedFixture: mapped, lifecycleWorkspaceFixture: workspace, lifecycleReleaseWorkspaceFixture: releaseWorkspace } = require(addon);
@@ -33,14 +35,26 @@ async function main() {
   await poisoned.close();
   assertClosed(poisoned);
   // Each scheduling/capture/deferred failure releases both destination and handle claims.
+  for (const storage of ['memory', 'mmap']) {
   for (const point of ['capture', 'save-deferred', 'okf-save', 'publication', 'publication-panic']) {
-    const index = fresh();
+    const index = storage === 'mmap' ? mapped() : fresh();
+    const owned = storage === 'mmap' ? workspace(index) : undefined;
+    const destination = target(`${storage}-${point}`);
+    await index.save(destination);
+    const previous = fs.readFileSync(destination);
+    index.ingestRaw(document('retryneedle'));
     hook(index, `fail:${point}`);
-    await assert.rejects(async () => index.save(target(point)));
-    await index.save(target(point));
+    await assert.rejects(async () => index.save(destination));
+    assert.deepEqual(fs.readFileSync(destination), previous);
+    assert.equal(index.search('retryneedle').length, 1);
+    await index.save(destination);
+    const restored = await Native.openRaw(root, destination, storage);
+    assert.equal(restored.search('retryneedle').length, 1);
     const contender = fresh();
-    await contender.save(target(point));
-    await Promise.all([index.close(), contender.close()]);
+    await contender.save(destination);
+    await Promise.all([index.close(), contender.close(), restored.close()]);
+    if (owned) assert(!fs.existsSync(owned));
+  }
   }
   // Invalid destination and destination contention also release the save permit.
   const index = fresh();
@@ -72,10 +86,18 @@ async function main() {
       const index = mapped();
       const owned = workspace(index);
       assert(fs.existsSync(owned));
+      const destination = target(`${point}-${fail}`);
+      index.ingestRaw(document('previousneedle'));
+      await index.save(destination);
+      const previous = fs.readFileSync(destination);
+      index.ingestRaw(document('publishedneedle'));
       if (fail) hook(index, `fail:${fail}`);
       hook(index, `pause:${point}`);
       const save = index.save(target(`${point}-${fail}`));
-      const observed = save.then(() => 'published', () => 'failed');
+      const observed = save.then(() => 'published', error => {
+        assert.match(error.message, fail === 'publication-panic' ? /ERR_OKF_NATIVE/ : /ERR_OKF_WRITE/);
+        return 'failed';
+      });
       hook(index, 'wait');
       const close = index.close();
       const again = index.close();
@@ -84,6 +106,11 @@ async function main() {
       assert.equal(await observed, fail ? 'failed' : 'published');
       await Promise.all([close, again, index.close()]);
       assert(!fs.existsSync(owned));
+      if (fail) assert.deepEqual(fs.readFileSync(destination), previous);
+      const reopened = await Native.openRaw(root, destination, 'mmap');
+      assert.equal(reopened.search(fail ? 'previousneedle' : 'publishedneedle').length, 1);
+      assert.equal(reopened.search(fail ? 'publishedneedle' : 'previousneedle').length, 0);
+      await reopened.close();
       const teardowns = hook(index, 'events').filter(x => x.startsWith('teardown:'));
       assert.deepEqual(teardowns, [`teardown:${point === 'idle' ? 'okf-close' : 'okf-save'}`]);
     }
@@ -168,12 +195,42 @@ async function main() {
   assert(!fs.existsSync(owned), 'environment teardown stranded workspace');
   assert(fs.existsSync(target(`environment-${close}`)));
   }
+  const holder = fork(__filename, [addon, root, 'hold-workspace'], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+  const exited = once(holder, 'exit');
+  let foreignPath;
+  try {
+  [foreignPath] = await once(holder, 'message', { signal: AbortSignal.timeout(15_000) });
   for (let n = 0; n < 20; n++) {
     const handle = mapped();
     const owned = workspace(handle);
+    for (let mutation = 0; mutation < 8; mutation++) {
+      handle.ingestRaw({ ...document(`stressneedle${n}`), path: `doc${mutation}.md` });
+    }
+    handle.removePath('doc0.md');
     const save = handle.save(target(`stress-${n}`));
     await Promise.all([save, handle.close(), handle.close()]);
     assert(!fs.existsSync(owned));
+    const reopened = await Native.openRaw(root, target(`stress-${n}`), 'mmap');
+    const reopenedPath = workspace(reopened);
+    assert.equal(reopened.indexStats().logical.documents.total, 7);
+    await reopened.close();
+    assert(!fs.existsSync(reopenedPath));
+    assert(fs.existsSync(foreignPath), 'close removed another process workspace');
   }
+  } finally {
+    if (foreignPath && holder.connected) holder.send('close');
+    else holder.kill();
+    const [code] = await exited;
+    assert.equal(code, 0);
+  }
+  assert(!fs.existsSync(foreignPath));
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+async function holdWorkspace() {
+  const handle = mapped();
+  const close = once(process, 'message');
+  process.send(workspace(handle));
+  await close;
+  await handle.close();
+  process.disconnect();
+}
+(process.argv[4] === 'hold-workspace' ? holdWorkspace() : main()).catch(error => { console.error(error); process.exitCode = 1; });
