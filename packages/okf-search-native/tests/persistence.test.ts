@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -20,6 +22,39 @@ import {
 import type { OkfOpenOptions } from "../src/index.js";
 
 const workspaces: string[] = [];
+
+it("reports the same structured workspace initialization error on cache hit and miss", async () => {
+  const { root, directory } = await workspace();
+  const hit = join(directory, "hit.cache");
+  const miss = join(directory, "miss.cache");
+  const engine = await openOkf(root, { cachePath: hit });
+  await engine.close();
+  const blocked = join(directory, "not-a-directory");
+  await writeFile(blocked, "blocked");
+  // Isolate temporary-directory configuration from concurrent tests and Rust threads.
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
+    import { openOkf, OkfError } from ${JSON.stringify(new URL("../dist/index.mjs", import.meta.url).href)};
+    const results = [];
+    for (const cachePath of ${JSON.stringify([hit, miss])}) {
+      try {
+        const engine = await openOkf(${JSON.stringify(root)}, { cachePath, storage: "mmap" });
+        await engine.close();
+        throw new Error("expected workspace initialization failure");
+      } catch (error) {
+        results.push({ typed: error instanceof OkfError, code: error.code, path: error.path, cause: String(error.cause) });
+      }
+    }
+    console.log(JSON.stringify(results));
+  `], {
+    env: { ...process.env, TMPDIR: blocked, TMP: blocked, TEMP: blocked },
+    encoding: "utf8",
+  });
+  const errors = JSON.parse(output);
+  for (const [index, path] of [hit, miss].entries()) {
+    expect(errors[index]).toMatchObject({ typed: true, code: "ERR_OKF_WRITE", path });
+    expect(errors[index].cause).toContain(blocked);
+  }
+});
 
 function concept(metadata: string, body = "body"): string {
   return `---\n${metadata.trim()}\n---\n${body}\n`;
@@ -76,6 +111,59 @@ function expectOkfError(
     expect(error).toMatchObject({ field });
   }
 }
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "close reports the real retained mmap workspace after removal fails",
+  async () => {
+    const { root, directory } = await workspace();
+    const temporary = join(directory, "native-tmp");
+    await mkdir(temporary);
+    const previousTmpdir = process.env.TMPDIR;
+    let index: Awaited<ReturnType<typeof openOkf>> | undefined;
+    let retained: string | undefined;
+    let failed = false;
+    try {
+      // Isolate native workspaces so the expected path comes from disk, not the error.
+      process.env.TMPDIR = temporary;
+      index = await openOkf(root, {
+        cachePath: join(directory, "cache.okf"), storage: "mmap",
+      });
+      const entries = await readdir(temporary);
+      expect(entries).toHaveLength(1);
+      retained = join(temporary, entries[0]!);
+      expect((await stat(retained)).isDirectory()).toBe(true);
+      // Deny unlinking children without interfering with worker shutdown or reads.
+      await chmod(retained, 0o500);
+      const close = index.close();
+      expect(index.close()).toBe(close);
+      const failure = await rejected(close);
+      expectOkfError(failure, "ERR_OKF_CLOSE", retained);
+      expect((await stat(retained)).isDirectory()).toBe(true);
+      expect(index.close()).toBe(close);
+      expect(await rejected(index.close())).toBe(failure);
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      const cleanupErrors: unknown[] = [];
+      if (retained !== undefined) {
+        await chmod(retained, 0o700).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") cleanupErrors.push(error);
+        });
+      }
+      await index?.close().catch(() => {});
+      await rm(temporary, { recursive: true, force: true }).catch((error: unknown) => {
+        cleanupErrors.push(error);
+      });
+      // Keep the assertion failure primary, but fail an otherwise passing test on cleanup errors.
+      if (!failed && cleanupErrors.length > 0) {
+        throw new AggregateError(cleanupErrors, "Failed to clean up mmap workspace");
+      }
+    }
+  },
+);
 
 afterEach(async () => {
   await Promise.all(workspaces.splice(0).map((path) => rm(path, {

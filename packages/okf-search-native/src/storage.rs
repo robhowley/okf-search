@@ -38,6 +38,21 @@ impl IndexStorage {
             }
         })
     }
+    pub(super) fn for_cache(
+        mode: StorageMode,
+        path: &str,
+    ) -> Result<Self, crate::preparation::PreparationError> {
+        Self::new(mode).map_err(|e| {
+            let code = if matches!(e, tantivy::TantivyError::OpenDirectoryError(_)) {
+                "ERR_OKF_READ"
+            } else {
+                "ERR_OKF_WRITE"
+            };
+            let mut error = crate::raw_api::invalid(code, path, None);
+            error.cause = Some(Box::new(e));
+            error
+        })
+    }
     pub(super) fn preserve_workspace(&mut self) -> Option<std::path::PathBuf> {
         match self {
             Self::Memory(_) => None,

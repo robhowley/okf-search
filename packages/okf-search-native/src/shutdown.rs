@@ -6,7 +6,10 @@ use std::{
 use tantivy::IndexWriter;
 
 #[cfg(test)]
-thread_local! { static REMOVALS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) }; }
+thread_local! {
+    pub(super) static REMOVALS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+    pub(super) static FAIL_REMOVAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ShutdownError {
@@ -54,6 +57,13 @@ pub(crate) fn finish<R>(
     if let Some(path) = &workspace {
         #[cfg(test)]
         REMOVALS.with(|attempts| attempts.borrow_mut().push(path.clone()));
+        #[cfg(test)]
+        if FAIL_REMOVAL.replace(false) {
+            return Err(ShutdownError {
+                message: "injected workspace removal failure".into(),
+                workspace,
+            });
+        }
         std::fs::remove_dir_all(path).map_err(|error| ShutdownError {
             message: format!("workspace removal failed: {error}"),
             workspace: workspace.clone(),

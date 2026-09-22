@@ -581,14 +581,7 @@ fn restore_at_path(
     path: &str,
 ) -> Result<Engine> {
     validate_managed(files).map_err(|e| error("ERR_OKF_CACHE_INVALID", path, e))?;
-    let storage = IndexStorage::new(mode).map_err(|e| {
-        let code = if matches!(e, tantivy::TantivyError::OpenDirectoryError(_)) {
-            "ERR_OKF_READ"
-        } else {
-            "ERR_OKF_WRITE"
-        };
-        error(code, path, e)
-    })?;
+    let storage = IndexStorage::for_cache(mode, path)?;
     materialize(files, documents, reconstruct_section_ids, path, storage)
 }
 fn materialize(
@@ -608,7 +601,7 @@ fn materialize(
     for (name, bytes) in files {
         directory
             .atomic_write(Path::new(name), bytes)
-            .map_err(|e| error("ERR_OKF_WRITE", &context, format!("{name}: {e}")))?;
+            .map_err(|e| error("ERR_OKF_WRITE", path, format!("{context}: {name}: {e}")))?;
     }
     let read_error = |e: tantivy::TantivyError| {
         let code = match &e {
@@ -618,13 +611,13 @@ fn materialize(
             | tantivy::TantivyError::IoError(_) => "ERR_OKF_READ",
             _ => "ERR_OKF_CACHE_INVALID",
         };
-        error(code, &context, e)
+        error(code, path, format!("{context}: {e}"))
     };
     let index = Index::open(directory).map_err(read_error)?;
     let (reader, fields, documents) = validate(index.clone(), documents, reconstruct_section_ids)
         .map_err(|e| match e {
         EngineError::Tantivy(e) => read_error(e),
-        e => error("ERR_OKF_CACHE_INVALID", &context, e),
+        e => error("ERR_OKF_CACHE_INVALID", path, format!("{context}: {e}")),
     })?;
     let workspace = storage.preserve_workspace();
     let writer = index
@@ -634,7 +627,7 @@ fn materialize(
                 Some(path) => format!("{e}; writer initialization failed; worker shutdown unproven; preserved workspace {}", path.display()),
                 None => e.to_string(),
             };
-            error("ERR_OKF_WRITE", &context, message)
+            error("ERR_OKF_WRITE", path, format!("{context}: {message}"))
         })?;
     Ok(Engine {
         workspace,
@@ -1138,6 +1131,14 @@ mod tests {
                 } else {
                     "ERR_OKF_CACHE_INVALID"
                 }
+            );
+            assert_eq!(failure.path, "cache");
+            assert!(
+                failure
+                    .cause
+                    .unwrap()
+                    .to_string()
+                    .contains(path.to_str().unwrap())
             );
             assert!(!path.exists());
             assert!(!source.search("searchable", None).unwrap().is_empty());
@@ -1788,7 +1789,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_close_drains_active_mapped_merges_and_removes_only_owned_workspace() {
+    fn repeated_close_with_active_mapped_merges_removes_only_owned_workspace() {
         use crate::storage::test_directory::{Gate, ObservedDirectory, TIMEOUT};
         use std::sync::mpsc;
         let other = Engine::new_with_storage(vec![document("other")], StorageMode::Mmap).unwrap();
@@ -1815,8 +1816,8 @@ mod tests {
             reached.recv_timeout(TIMEOUT).unwrap();
             let (done_tx, done_rx) = mpsc::channel();
             let close = std::thread::spawn(move || done_tx.send(source.shutdown()).unwrap());
-            assert!(done_rx.try_recv().is_err());
-            assert!(workspace.exists());
+            // Cover merge completion and workspace isolation, not whether close blocks.
+            // shutdown::tests exercises shutdown with workers held live until it returns.
             release.send(()).unwrap();
             assert!(merging.wait().unwrap().is_some());
             done_rx.recv_timeout(TIMEOUT).unwrap().unwrap();

@@ -170,11 +170,26 @@ impl Task for OpenTask {
             .map(PreparedEntry::into_document)
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(native_error)?;
-        let engine = Engine::new_with_storage(documents, mode).map_err(native_error)?;
+        let storage =
+            match crate::IndexStorage::for_cache(mode, cache_path.as_deref().unwrap_or(&root)) {
+                Ok(storage) => storage,
+                Err(error) => return Ok(Err(error)),
+            };
+        let directory = storage.directory();
+        let engine =
+            Engine::new_in_directory(documents, storage, directory).map_err(native_error)?;
         if let Some(guard) = guard
-            && let Err(e) = crate::persistence::Snapshot::capture(&engine)
+            && let Err(mut e) = crate::persistence::Snapshot::capture(&engine)
                 .and_then(|snapshot| snapshot.publish(&guard))
         {
+            if let Err(cleanup) = engine.shutdown() {
+                let original = e
+                    .cause
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
+                e.cause = Some(format!("{original}; {cleanup}").into());
+            }
             return Ok(Err(e));
         }
         Ok(Ok(NativeOkfSearch {
@@ -525,6 +540,51 @@ mod persistence_tests {
                 1.0
             );
             assert!(crate::persistence::load(&cache_path).unwrap().is_some());
+        }
+    }
+
+    #[test]
+    fn mapped_initial_publication_failure_reports_cleanup_and_retained_workspace() {
+        for fail_cleanup in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("root");
+            fs::create_dir(&root).unwrap();
+            let cache = temp.path().join("cache").to_str().unwrap().to_owned();
+            crate::shutdown::REMOVALS.with(|paths| paths.borrow_mut().clear());
+            crate::shutdown::FAIL_REMOVAL.set(fail_cleanup);
+            crate::persistence::PUBLICATION_FAILURE.set(Some(0));
+            let result = OpenTask {
+                root: root.to_str().unwrap().to_owned().into(),
+                cache_path: Some(cache.clone().into()),
+                storage: Some("mmap".to_owned().into()),
+            }
+            .compute()
+            .unwrap();
+            let error = result.err().expect("publication must fail");
+            assert_eq!(error.code, "ERR_OKF_WRITE");
+            assert_eq!(error.path, cache);
+            let cause = error.cause.unwrap().to_string();
+            assert!(cause.contains("injected publication failure"), "{cause}");
+            let paths = crate::shutdown::REMOVALS.with(|paths| paths.borrow().clone());
+            assert_eq!(
+                paths.len(),
+                1,
+                "shutdown must consume the engine exactly once"
+            );
+            let workspace = &paths[0];
+            assert_eq!(workspace.exists(), fail_cleanup);
+            if fail_cleanup {
+                assert!(cause.contains("ERR_OKF_CLOSE"), "{cause}");
+                assert!(
+                    cause.contains("injected workspace removal failure"),
+                    "{cause}"
+                );
+                assert!(cause.contains(workspace.to_str().unwrap()), "{cause}");
+                fs::remove_dir_all(workspace).unwrap();
+            } else {
+                assert!(!cause.contains("ERR_OKF_CLOSE"));
+            }
+            assert!(!std::path::Path::new(&cache).exists());
         }
     }
 
