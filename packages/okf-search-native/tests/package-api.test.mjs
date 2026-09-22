@@ -632,37 +632,6 @@ test(`package API persists across fresh processes and preserves private generati
 
 }
 
-test("package API rejects overlapping writers and allows retry", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "okf-search-native-busy-api-"));
-  const cachePath = join(workspace, "cache", "busy.okf");
-  try {
-    const root = require("okf-search-native");
-    const index = root.createOkfSearch(
-      Array.from({ length: 10 }, (_, document) => ({
-        path: `document-${document}.md`,
-        markdown: markdown(
-          "note",
-          `busy-package-marker-${document} ${"payload ".repeat(20_000)}`,
-        ),
-      })),
-    );
-    const results = await Promise.allSettled([
-      index.save(cachePath),
-      index.save(cachePath),
-    ]);
-    const fulfilled = results.filter((result) => result.status === "fulfilled");
-    const rejected = results.filter((result) => result.status === "rejected");
-    assert.equal(fulfilled.length, 1);
-    assert.equal(rejected.length, 1);
-    assert.equal(rejected[0].reason.code, "ERR_OKF_PERSISTENCE_BUSY");
-    assert.equal(rejected[0].reason.path, "<index>");
-    await index.save(cachePath);
-    await index.close();
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});
-
 test("public child and worker APIs reject a held writer claim, read the old cache, and retry", { timeout: 660_000 }, async () => {
   // Reuse the Rust test-only pre-publication barrier. No timing race, addon
   // hook, or platform-specific external locking utility is needed.

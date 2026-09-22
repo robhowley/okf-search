@@ -81,17 +81,38 @@ async function main() {
     if (owned) assert(!fs.existsSync(owned));
   }
   }
-  // Exercise real native scheduling failure through the built facade translator.
+  // Exercise real native failures and held save claims through the built facade translator.
   const facadeNative = fresh();
+  const contenderNative = fresh();
+  const facadeNatives = [facadeNative, contenderNative];
   const loader = require.resolve('../../native.cjs');
   require.cache[loader] = { id: loader, filename: loader, loaded: true,
-    exports: { NativeOkfSearch: { fromRaw: () => facadeNative } } };
-  const facade = require('../../dist/index.cjs').createOkfSearch([]);
+    exports: { NativeOkfSearch: { fromRaw: () => facadeNatives.shift() } } };
+  const { createOkfSearch, OkfError } = require('../../dist/index.cjs');
+  const facade = createOkfSearch([]);
+  const facadeContender = createOkfSearch([]);
   const facadeDestination = target('facade-spawn');
   hook(facadeNative, 'fail:okf-save');
   await assert.rejects(facade.save(facadeDestination), { code: 'ERR_OKF_WRITE', path: facadeDestination });
   await facade.save(facadeDestination);
-  await facade.close();
+
+  // Back-to-back JS calls need not overlap native publication. Hold both claims
+  // until the same-handle and independent-handle rejections have been observed.
+  hook(facadeNative, 'pause:publication');
+  const facadeSave = facade.save(facadeDestination);
+  try {
+    hook(facadeNative, 'wait');
+    await assert.rejects(facade.save(target('facade-different')), error =>
+      error instanceof OkfError && error.code === 'ERR_OKF_PERSISTENCE_BUSY' && error.path === '<index>');
+    await assert.rejects(facadeContender.save(facadeDestination), error =>
+      error instanceof OkfError && error.code === 'ERR_OKF_CACHE_BUSY' && error.path === facadeDestination);
+  } finally {
+    hook(facadeNative, 'release');
+    await facadeSave;
+  }
+  await facade.save(facadeDestination);
+  await facadeContender.save(facadeDestination);
+  await Promise.all([facade.close(), facadeContender.close()]);
 
   // Invalid destination and destination contention also release the save permit.
   const index = fresh();
