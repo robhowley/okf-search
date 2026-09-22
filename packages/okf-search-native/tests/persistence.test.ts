@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -52,7 +52,8 @@ it("reports the same structured workspace initialization error on cache hit and 
   const errors = JSON.parse(output);
   for (const [index, path] of [hit, miss].entries()) {
     expect(errors[index]).toMatchObject({ typed: true, code: "ERR_OKF_WRITE", path });
-    expect(errors[index].cause).toContain(blocked);
+    // tempfile Debug-formats the path, escaping Windows separators in the cause.
+    expect(errors[index].cause).toContain(basename(blocked));
   }
 });
 
