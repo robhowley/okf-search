@@ -23,6 +23,29 @@ the required artifact names from the checked-in target list and rejects missing
 or extra native files. CI also uses its `glibc <artifact>` mode to reject Linux
 addons that import symbols newer than `GLIBC_2.17`.
 
+## Native lifecycle and mapped workspaces
+
+`openOkf` defaults to the in-memory backend. Root opens may opt into
+`{ cachePath, storage: "mmap" }`; `cachePath` is required, and invalid options
+or mmap initialization failures reject without a memory fallback. The portable
+`.okf` archive remains an ordinary file. Each mapped handle extracts a private
+Tantivy workspace under the operating system's temporary directory, so mapped
+indexes can use extra disk space and can contain plaintext index data. Existing
+handles keep their private views when another handle replaces the archive.
+
+All handles expose non-saving `close()`. It stops admission immediately and
+drains an accepted save before teardown. Save publication and close cleanup
+have independent outcomes. Successful mapped close removes its workspace; an
+uncertain shutdown or failed removal retains the path and reports
+`ERR_OKF_CLOSE`. Manual cleanup is safe only after verifying that no process
+still uses the retained workspace. Prepared constructors remain memory-only and
+have no mmap storage option.
+
+Mmap `save()` captures committed files synchronously before returning its
+promise, so a large index can block the calling thread. A save captures the
+handle's complete view at invocation and replaces the destination; it does not
+merge or refresh the handle. A stale handle can therefore replace newer work.
+
 ## Persistence checks
 
 The package `test` command above covers persistence at three boundaries:
@@ -68,5 +91,19 @@ classifications, and indexed/stored agreement. No independent ownership digest i
 stored: coordinated checksum-resigned ID rewrites that remain internally
 consistent are not promised detection. The checksum is not authentication.
 Formats 1 and 2 are incompatible; there is no migration or automatic rebuild.
+
+`indexStats().storage.sizeInBytes` is sampled backing size, not RSS. Memory mode
+samples the `RamDirectory`; mmap sums regular files in one scan of the private
+workspace, including management, lock, temporary, and obsolete files present at
+that moment. It is not an exact committed-generation size or mapped-page count.
+
+## Package and release validation
+
+From the repository root, run `pnpm package:check` for the full build,
+Rust checks, declarations, tests, packing, and consumer validation. Run
+`pnpm test:release-workflow` for the release workflow tests. The native release
+consumer includes one packed-package smoke that opens mmap storage, searches,
+saves, and closes it. Keep the four checked-in targets and the Linux
+`GLIBC_2.17` floor unchanged.
 
 

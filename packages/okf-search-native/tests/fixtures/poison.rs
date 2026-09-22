@@ -4,6 +4,6 @@ use super::*;
 #[napi(js_name = "createPoisonedSearchFixture")]
 pub fn create_poisoned_search_fixture() -> NapiResult<NativeOkfSearch> {
     let handle = NativeOkfSearch::from_prepared(vec![])?;
-    let _ = handle.inner.lock().poison::<()>("test fixture failure");
+    let _ = handle.inner.admit()?.poison::<()>("test fixture failure");
     Ok(handle)
 }

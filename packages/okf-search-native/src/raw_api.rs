@@ -1,9 +1,9 @@
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, Object, ToNapiValue, Unknown, Utf16String};
 use napi::{Env, Error, Result, Task};
 use okf_prepare_core::{self as core, Prepared};
-use parking_lot::Mutex;
 
 use crate::preparation::{self, Identity, PreparationError, PreparedEntry};
+use crate::storage::StorageMode;
 use crate::{Engine, NativeOkfSearch, native_error};
 
 pub(super) fn invalid(code: &'static str, path: &str, field: Option<&str>) -> PreparationError {
@@ -111,34 +111,46 @@ pub(super) fn validate_raw(env: Env, input: Object<'_>) -> Result<Object<'static
 pub struct OpenTask {
     root: Utf16String,
     cache_path: Option<Utf16String>,
+    storage: Option<Utf16String>,
 }
 impl Task for OpenTask {
     type Output = std::result::Result<NativeOkfSearch, PreparationError>;
     type JsValue = NativeOkfSearch;
     fn compute(&mut self) -> Result<Self::Output> {
+        let mode = match storage_mode(self.storage.as_ref()) {
+            Ok(mode) => mode,
+            Err(error) => return Ok(Err(error)),
+        };
+        let cache_path = match &self.cache_path {
+            Some(value) => match crate::persistence::path(value, "cachePath") {
+                Ok(path) => Some(path),
+                Err(error) => return Ok(Err(error)),
+            },
+            None => None,
+        };
+        if matches!(mode, StorageMode::Mmap) && cache_path.is_none() {
+            return Ok(Err(invalid("ERR_OKF_FIELD", "<input>", Some("cachePath"))));
+        }
+
         let mut guard = None;
-        if let Some(value) = &self.cache_path {
-            let path = match crate::persistence::path(value, "cachePath") {
-                Ok(path) => path,
-                Err(e) => return Ok(Err(e)),
-            };
-            match crate::persistence::load(&path) {
+        if let Some(path) = &cache_path {
+            match crate::persistence::load_with_storage(path, mode) {
                 Ok(Some(engine)) => {
                     return Ok(Ok(NativeOkfSearch {
-                        inner: Mutex::new(engine),
+                        inner: crate::lifecycle::HandleState::new(engine),
                     }));
                 }
                 Err(e) => return Ok(Err(e)),
                 Ok(None) => (),
             }
-            guard = match crate::persistence::WriterGuard::acquire(&path) {
+            guard = match crate::persistence::WriterGuard::acquire(path) {
                 Ok(guard) => Some(guard),
                 Err(e) => return Ok(Err(e)),
             };
-            match crate::persistence::load(&path) {
+            match crate::persistence::load_with_storage(path, mode) {
                 Ok(Some(engine)) => {
                     return Ok(Ok(NativeOkfSearch {
-                        inner: Mutex::new(engine),
+                        inner: crate::lifecycle::HandleState::new(engine),
                     }));
                 }
                 Err(e) => return Ok(Err(e)),
@@ -158,14 +170,30 @@ impl Task for OpenTask {
             .map(PreparedEntry::into_document)
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(native_error)?;
-        let engine = Engine::new(documents).map_err(native_error)?;
-        if let Some(guard) = guard {
-            if let Err(e) = crate::persistence::Snapshot::capture(&engine).publish(&guard) {
-                return Ok(Err(e));
+        let storage =
+            match crate::IndexStorage::for_cache(mode, cache_path.as_deref().unwrap_or(&root)) {
+                Ok(storage) => storage,
+                Err(error) => return Ok(Err(error)),
+            };
+        let directory = storage.directory();
+        let engine =
+            Engine::new_in_directory(documents, storage, directory).map_err(native_error)?;
+        if let Some(guard) = guard
+            && let Err(mut e) = crate::persistence::Snapshot::capture(&engine)
+                .and_then(|snapshot| snapshot.publish(&guard))
+        {
+            if let Err(cleanup) = engine.shutdown() {
+                let original = e
+                    .cause
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
+                e.cause = Some(format!("{original}; {cleanup}").into());
             }
+            return Ok(Err(e));
         }
         Ok(Ok(NativeOkfSearch {
-            inner: Mutex::new(engine),
+            inner: crate::lifecycle::HandleState::new(engine),
         }))
     }
     fn resolve(&mut self, env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -176,8 +204,27 @@ impl Task for OpenTask {
     }
 }
 
-pub(super) fn open_raw(root: Utf16String, cache_path: Option<Utf16String>) -> AsyncTask<OpenTask> {
-    AsyncTask::new(OpenTask { root, cache_path })
+fn storage_mode(value: Option<&Utf16String>) -> std::result::Result<StorageMode, PreparationError> {
+    let Some(value) = value else {
+        return Ok(StorageMode::Memory);
+    };
+    match decode(value, "ERR_OKF_FIELD", "<input>", Some("storage"))?.as_str() {
+        "memory" => Ok(StorageMode::Memory),
+        "mmap" => Ok(StorageMode::Mmap),
+        _ => Err(invalid("ERR_OKF_FIELD", "<input>", Some("storage"))),
+    }
+}
+
+pub(super) fn open_raw(
+    root: Utf16String,
+    cache_path: Option<Utf16String>,
+    storage: Option<Utf16String>,
+) -> AsyncTask<OpenTask> {
+    AsyncTask::new(OpenTask {
+        root,
+        cache_path,
+        storage,
+    })
 }
 
 pub(super) fn ingest_result(env: &Env, entry: &PreparedEntry) -> Result<Object<'static>> {
@@ -408,6 +455,7 @@ mod persistence_tests {
         let opened = OpenTask {
             root: root.to_str().unwrap().to_owned().into(),
             cache_path: Some(cache.clone().into()),
+            storage: None,
         }
         .compute()
         .unwrap()
@@ -415,7 +463,8 @@ mod persistence_tests {
         assert_eq!(
             opened
                 .inner
-                .lock()
+                .admit()
+                .unwrap()
                 .index_stats()
                 .unwrap()
                 .logical
@@ -428,6 +477,7 @@ mod persistence_tests {
         let loaded = OpenTask {
             root: vec![0xd800].into(),
             cache_path: Some(cache.into()),
+            storage: None,
         }
         .compute()
         .unwrap()
@@ -435,7 +485,8 @@ mod persistence_tests {
         assert_eq!(
             loaded
                 .inner
-                .lock()
+                .admit()
+                .unwrap()
                 .index_stats()
                 .unwrap()
                 .logical
@@ -457,6 +508,7 @@ mod persistence_tests {
             let mut task = OpenTask {
                 root: root.to_str().unwrap().to_owned().into(),
                 cache_path: Some(cache_path.clone().into()),
+                storage: None,
             };
             // Exercise the actual miss branch, not the publisher in isolation.
             crate::persistence::PUBLICATION_FAILURE.set(Some(point));
@@ -478,7 +530,8 @@ mod persistence_tests {
             assert_eq!(
                 opened
                     .inner
-                    .lock()
+                    .admit()
+                    .unwrap()
                     .index_stats()
                     .unwrap()
                     .logical
@@ -491,6 +544,51 @@ mod persistence_tests {
     }
 
     #[test]
+    fn mapped_initial_publication_failure_reports_cleanup_and_retained_workspace() {
+        for fail_cleanup in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("root");
+            fs::create_dir(&root).unwrap();
+            let cache = temp.path().join("cache").to_str().unwrap().to_owned();
+            crate::shutdown::REMOVALS.with(|paths| paths.borrow_mut().clear());
+            crate::shutdown::FAIL_REMOVAL.set(fail_cleanup);
+            crate::persistence::PUBLICATION_FAILURE.set(Some(0));
+            let result = OpenTask {
+                root: root.to_str().unwrap().to_owned().into(),
+                cache_path: Some(cache.clone().into()),
+                storage: Some("mmap".to_owned().into()),
+            }
+            .compute()
+            .unwrap();
+            let error = result.err().expect("publication must fail");
+            assert_eq!(error.code, "ERR_OKF_WRITE");
+            assert_eq!(error.path, cache);
+            let cause = error.cause.unwrap().to_string();
+            assert!(cause.contains("injected publication failure"), "{cause}");
+            let paths = crate::shutdown::REMOVALS.with(|paths| paths.borrow().clone());
+            assert_eq!(
+                paths.len(),
+                1,
+                "shutdown must consume the engine exactly once"
+            );
+            let workspace = &paths[0];
+            assert_eq!(workspace.exists(), fail_cleanup);
+            if fail_cleanup {
+                assert!(cause.contains("ERR_OKF_CLOSE"), "{cause}");
+                assert!(
+                    cause.contains("injected workspace removal failure"),
+                    "{cause}"
+                );
+                assert!(cause.contains(workspace.to_str().unwrap()), "{cause}");
+                fs::remove_dir_all(workspace).unwrap();
+            } else {
+                assert!(!cause.contains("ERR_OKF_CLOSE"));
+            }
+            assert!(!std::path::Path::new(&cache).exists());
+        }
+    }
+
+    #[test]
     fn persistence_bad_cache_rejects_without_source_fallback() {
         let temp = tempfile::tempdir().unwrap();
         let cache = temp.path().join("cache");
@@ -498,6 +596,7 @@ mod persistence_tests {
         let result = OpenTask {
             root: vec![0xd800].into(),
             cache_path: Some(cache.to_str().unwrap().to_owned().into()),
+            storage: None,
         }
         .compute()
         .unwrap();
@@ -512,6 +611,7 @@ mod persistence_tests {
         let result = OpenTask {
             root: vec![0xd800].into(),
             cache_path: Some(cache.into()),
+            storage: None,
         }
         .compute()
         .unwrap();
@@ -520,6 +620,7 @@ mod persistence_tests {
             let result = OpenTask {
                 root: vec![0xd800].into(),
                 cache_path: Some(path.into()),
+                storage: None,
             }
             .compute()
             .unwrap();

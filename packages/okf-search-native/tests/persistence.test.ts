@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -8,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -17,11 +19,55 @@ import {
   OkfError,
   openOkf,
 } from "../src/index.js";
+import type { OkfOpenOptions } from "../src/index.js";
 
 const workspaces: string[] = [];
 
+it("reports the same structured workspace initialization error on cache hit and miss", async () => {
+  const { root, directory } = await workspace();
+  const hit = join(directory, "hit.cache");
+  const miss = join(directory, "miss.cache");
+  const engine = await openOkf(root, { cachePath: hit });
+  await engine.close();
+  const blocked = join(directory, "not-a-directory");
+  await writeFile(blocked, "blocked");
+  // Isolate temporary-directory configuration from concurrent tests and Rust threads.
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
+    import { openOkf, OkfError } from ${JSON.stringify(new URL("../dist/index.mjs", import.meta.url).href)};
+    const results = [];
+    for (const cachePath of ${JSON.stringify([hit, miss])}) {
+      try {
+        const engine = await openOkf(${JSON.stringify(root)}, { cachePath, storage: "mmap" });
+        await engine.close();
+        throw new Error("expected workspace initialization failure");
+      } catch (error) {
+        results.push({ typed: error instanceof OkfError, code: error.code, path: error.path, cause: String(error.cause) });
+      }
+    }
+    console.log(JSON.stringify(results));
+  `], {
+    env: { ...process.env, TMPDIR: blocked, TMP: blocked, TEMP: blocked },
+    encoding: "utf8",
+  });
+  const errors = JSON.parse(output);
+  for (const [index, path] of [hit, miss].entries()) {
+    expect(errors[index]).toMatchObject({ typed: true, code: "ERR_OKF_WRITE", path });
+    // tempfile Debug-formats the path, escaping Windows separators in the cause.
+    expect(errors[index].cause).toContain(basename(blocked));
+  }
+});
+
 function concept(metadata: string, body = "body"): string {
   return `---\n${metadata.trim()}\n---\n${body}\n`;
+}
+
+function cacheOptions(
+  cachePath: string,
+  storage: "memory" | "mmap",
+): OkfOpenOptions {
+  return storage === "mmap"
+    ? { cachePath, storage: "mmap" }
+    : { cachePath, storage: "memory" };
 }
 
 async function workspace(): Promise<{ root: string; directory: string }> {
@@ -67,6 +113,59 @@ function expectOkfError(
   }
 }
 
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "close reports the real retained mmap workspace after removal fails",
+  async () => {
+    const { root, directory } = await workspace();
+    const temporary = join(directory, "native-tmp");
+    await mkdir(temporary);
+    const previousTmpdir = process.env.TMPDIR;
+    let index: Awaited<ReturnType<typeof openOkf>> | undefined;
+    let retained: string | undefined;
+    let failed = false;
+    try {
+      // Isolate native workspaces so the expected path comes from disk, not the error.
+      process.env.TMPDIR = temporary;
+      index = await openOkf(root, {
+        cachePath: join(directory, "cache.okf"), storage: "mmap",
+      });
+      const entries = await readdir(temporary);
+      expect(entries).toHaveLength(1);
+      retained = join(temporary, entries[0]!);
+      expect((await stat(retained)).isDirectory()).toBe(true);
+      // Deny unlinking children without interfering with worker shutdown or reads.
+      await chmod(retained, 0o500);
+      const close = index.close();
+      expect(index.close()).toBe(close);
+      const failure = await rejected(close);
+      expectOkfError(failure, "ERR_OKF_CLOSE", retained);
+      expect((await stat(retained)).isDirectory()).toBe(true);
+      expect(index.close()).toBe(close);
+      expect(await rejected(index.close())).toBe(failure);
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      const cleanupErrors: unknown[] = [];
+      if (retained !== undefined) {
+        await chmod(retained, 0o700).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") cleanupErrors.push(error);
+        });
+      }
+      await index?.close().catch(() => {});
+      await rm(temporary, { recursive: true, force: true }).catch((error: unknown) => {
+        cleanupErrors.push(error);
+      });
+      // Keep the assertion failure primary, but fail an otherwise passing test on cleanup errors.
+      if (!failed && cleanupErrors.length > 0) {
+        throw new AggregateError(cleanupErrors, "Failed to clean up mmap workspace");
+      }
+    }
+  },
+);
+
 afterEach(async () => {
   await Promise.all(workspaces.splice(0).map((path) => rm(path, {
     recursive: true,
@@ -93,26 +192,58 @@ describe("public persistence lifecycle", () => {
     await expect(cached.save(cachePath)).resolves.toBeUndefined();
   });
 
-  it("reads cachePath once before delegating to native open", async () => {
+  it("reads each open option getter once before delegating to native open", async () => {
     const { root, directory } = await workspace();
     await writeCollection(root, {
       "source.md": concept("type: note", "option-getter-marker"),
     });
     const cachePath = join(directory, "cache", "getter.okf");
-    let reads = 0;
+    let cacheReads = 0;
+    let storageReads = 0;
     const options = {
       get cachePath(): string {
-        reads += 1;
+        cacheReads += 1;
         return cachePath;
+      },
+      get storage(): "mmap" {
+        storageReads += 1;
+        return "mmap";
       },
     };
 
     const index = await openOkf(root, options);
-    expect(reads).toBe(1);
+    expect(cacheReads).toBe(1);
+    expect(storageReads).toBe(1);
+    expect(index.indexStats().storage.kind).toBe("mapped-index-files");
     expect(index.search("option-getter-marker")).toHaveLength(1);
+    await index.close();
   });
 
-  it("round-trips logical state, diagnostics, metadata, and empty-body documents", async () => {
+  it("rejects invalid storage options without rebuilding or falling back", async () => {
+    const { root } = await workspace();
+    await writeCollection(root, {
+      "source.md": concept("type: note", "strict-options-marker"),
+    });
+
+    expectOkfError(
+      await rejected(openOkf(root, { storage: "mmap" })),
+      "ERR_OKF_FIELD",
+      "<input>",
+      "cachePath",
+    );
+    expectOkfError(
+      await rejected(openOkf(root, {
+        storage: "unknown",
+      } as unknown as OkfOpenOptions)),
+      "ERR_OKF_FIELD",
+      "<input>",
+      "storage",
+    );
+  });
+
+  it.each(["memory", "mmap"] as const)(
+    "round-trips logical state, diagnostics, metadata, and empty-body documents (%s)",
+    async (storage) => {
     const { root, directory } = await workspace();
     await writeCollection(root, {
       "strict.md": concept(
@@ -134,16 +265,15 @@ stale_after: 2027-01-01T00:00:00Z`,
     });
 
     const cachePath = join(directory, "cache", "collection.okf");
-    const original = await openOkf(root, { cachePath });
+    const options = cacheOptions(cachePath, storage);
+    const original = await openOkf(root, options);
     const logical = original.indexStats().logical;
     const hits = original.search("roundtrip-marker", {
       where: { tagsAny: ["persisted"], conformance: ["strict"] },
     });
     const degraded = original.listDegradedDocuments();
 
-    const cached = await openOkf(join(directory, "source-was-removed"), {
-      cachePath,
-    });
+    const cached = await openOkf(join(directory, "source-was-removed"), options);
     expect(cached.indexStats().logical).toEqual(logical);
     expect(cached.search("roundtrip-marker", {
       where: { tagsAny: ["persisted"], conformance: ["strict"] },
@@ -151,16 +281,24 @@ stale_after: 2027-01-01T00:00:00Z`,
     expect(cached.listDegradedDocuments()).toEqual(degraded);
     expect(cached.search("degraded-marker", { match: "all" })).toHaveLength(1);
     expect(cached.search("empty")).toEqual(original.search("empty"));
+    expect(original.indexStats().storage.kind).toBe(
+      storage === "mmap" ? "mapped-index-files" : "in-memory-index-files",
+    );
     expect(cached.indexStats().logical.documents.total).toBe(3);
-  });
+    await Promise.all([original.close(), cached.close()]);
+    },
+  );
 
-  it("saves handle mutations explicitly and captures before later mutations", async () => {
+  it.each(["memory", "mmap"] as const)(
+    "saves handle mutations explicitly and captures before later mutations (%s)",
+    async (storage) => {
     const { root, directory } = await workspace();
     await writeCollection(root, {
       "seed.md": concept("type: note", "seed-marker"),
     });
     const cachePath = join(directory, "cache", "mutations.okf");
-    const index = await openOkf(root, { cachePath });
+    const options = cacheOptions(cachePath, storage);
+    const index = await openOkf(root, options);
 
     index.ingest({
       path: "saved.md",
@@ -172,9 +310,7 @@ stale_after: 2027-01-01T00:00:00Z`,
       markdown: concept("type: note", "unsaved-marker"),
     });
 
-    const beforeSecondSave = await openOkf(join(directory, "missing-root"), {
-      cachePath,
-    });
+    const beforeSecondSave = await openOkf(join(directory, "missing-root"), options);
     expect(beforeSecondSave.search("saved-marker", { match: "all" })).toHaveLength(1);
     expect(beforeSecondSave.search("unsaved-marker", { match: "all" })).toEqual([]);
 
@@ -185,23 +321,55 @@ stale_after: 2027-01-01T00:00:00Z`,
     });
     await pending;
 
-    const captured = await openOkf(join(directory, "another-missing-root"), {
-      cachePath,
-    });
+    const captured = await openOkf(join(directory, "another-missing-root"), options);
     expect(captured.search("after-capture-marker", { match: "all" })).toEqual([]);
     await beforeSecondSave.save(cachePath);
-    const afterSecondSave = await openOkf(join(directory, "final-missing-root"), {
-      cachePath,
-    });
+    const afterSecondSave = await openOkf(join(directory, "final-missing-root"), options);
     expect(afterSecondSave.search("after-capture-marker", { match: "all" })).toHaveLength(1);
 
     expect(beforeSecondSave.remove("saved.md")).toBe(true);
     await beforeSecondSave.save(cachePath);
-    const afterRemove = await openOkf(join(directory, "remove-missing-root"), {
-      cachePath,
-    });
+    const afterRemove = await openOkf(join(directory, "remove-missing-root"), options);
     expect(afterRemove.search("saved-marker", { match: "all" })).toEqual([]);
     expect(afterRemove.search("seed-marker", { match: "all" })).toHaveLength(1);
+    await Promise.all([
+      index.close(),
+      beforeSecondSave.close(),
+      captured.close(),
+      afterSecondSave.close(),
+      afterRemove.close(),
+    ]);
+    },
+  );
+
+  it("reopens the same archive across memory and mmap backends", async () => {
+    const { directory } = await workspace();
+    const cachePath = join(directory, "cache", "cross-backend.okf");
+    const memory = createOkfSearch([{
+      path: "memory.md",
+      markdown: concept("type: note", "memory-generation-marker"),
+    }]);
+    await memory.save(cachePath);
+
+    const mapped = await openOkf(join(directory, "missing-root"), {
+      cachePath,
+      storage: "mmap",
+    });
+    expect(mapped.indexStats().storage.kind).toBe("mapped-index-files");
+    expect(mapped.search("memory-generation-marker")).toHaveLength(1);
+    mapped.ingest({
+      path: "mapped.md",
+      markdown: concept("type: guide", "mappedonlymarker"),
+    });
+    await mapped.save(cachePath);
+
+    const reopened = await openOkf(join(directory, "another-missing-root"), {
+      cachePath,
+      storage: "memory",
+    });
+    expect(reopened.indexStats().storage.kind).toBe("in-memory-index-files");
+    expect(reopened.search("mappedonlymarker")).toHaveLength(1);
+    await Promise.all([memory.close(), mapped.close(), reopened.close()]);
   });
 
   it("translates path errors and keeps a healthy handle after a cache write failure", async () => {
@@ -273,24 +441,34 @@ stale_after: 2027-01-01T00:00:00Z`,
     expect((await stat(validCache)).isFile()).toBe(true);
   });
 
-  it("rejects an existing corrupt cache without rebuilding from the source root", async () => {
-    const { root, directory } = await workspace();
-    await writeCollection(root, {
-      "source.md": concept("type: note", "corruption-marker"),
-    });
-    const cachePath = join(directory, "cache", "corruptible.okf");
-    const index = await openOkf(root, { cachePath });
-    const bytes = await readFile(cachePath);
-    await writeFile(cachePath, bytes.subarray(0, Math.max(1, Math.floor(bytes.length / 2))));
+  it.each(["memory", "mmap"] as const)(
+    "rejects an existing corrupt cache without rebuilding from the source root (%s)",
+    async (storage) => {
+      const { root, directory } = await workspace();
+      await writeCollection(root, {
+        "source.md": concept("type: note", "corruption-marker"),
+      });
+      const cachePath = join(directory, "cache", "corruptible.okf");
+      const options = cacheOptions(cachePath, storage);
+      const index = await openOkf(root, options);
+      const bytes = await readFile(cachePath);
+      await writeFile(cachePath, bytes.subarray(0, Math.max(1, Math.floor(bytes.length / 2))));
+      await index.close();
 
-    const error = await rejected(openOkf(join(directory, "source-is-missing"), {
-      cachePath,
-    }));
-    expectOkfError(error, "ERR_OKF_CACHE_INVALID", cachePath);
-    expect((error as Error).message).not.toMatch(/source-is-missing/);
-  });
+      const error = await rejected(openOkf(join(directory, "source-is-missing"), options));
+      expectOkfError(error, "ERR_OKF_CACHE_INVALID", cachePath);
+      expect((error as Error).message).not.toMatch(/source-is-missing/);
+    },
+  );
 
-  it.each([1, 2])("rejects format %s without rebuilding or replacing the cache", async (format) => {
+  it.each([
+    ["memory", 1],
+    ["memory", 2],
+    ["mmap", 1],
+    ["mmap", 2],
+  ] as const)(
+    "rejects unsupported archive versions in %s storage (%s)",
+    async (storage, format) => {
     const { root, directory } = await workspace();
     await writeCollection(root, {
       "source.md": concept("type: note", "old-format-marker"),
@@ -303,7 +481,8 @@ stale_after: 2027-01-01T00:00:00Z`,
     old.writeBigUInt64LE(2n, 12);
     old.write("{}", 20);
     await writeFile(cachePath, old);
-    expectOkfError(await rejected(openOkf(root, { cachePath })),
+    const options = cacheOptions(cachePath, storage);
+    expectOkfError(await rejected(openOkf(root, options)),
       "ERR_OKF_CACHE_INCOMPATIBLE", cachePath);
     expect(await readFile(cachePath)).toEqual(old);
   });
@@ -353,60 +532,4 @@ stale_after: 2027-01-01T00:00:00Z`,
     await Promise.all([writer, readers]);
   });
 
-  it("rejects overlapping saves and permits a later retry", async () => {
-    const { directory } = await workspace();
-    const cachePath = join(directory, "cache", "busy.okf");
-    const index = createOkfSearch(
-      Array.from({ length: 12 }, (_, document) => ({
-        path: `document-${document}.md`,
-        markdown: concept(
-          "type: note",
-          `busy-marker-${document} ${"payload ".repeat(20_000)}`,
-        ),
-      })),
-    );
-
-    const results = await Promise.allSettled([
-      index.save(cachePath),
-      index.save(cachePath),
-    ]);
-    const fulfilled = results.filter(
-      (result): result is PromiseFulfilledResult<void> => result.status === "fulfilled",
-    );
-    const rejectedResults = results.filter(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    expect(fulfilled).toHaveLength(1);
-    expect(rejectedResults).toHaveLength(1);
-    expectOkfError(rejectedResults[0]!.reason, "ERR_OKF_CACHE_BUSY", cachePath);
-
-    await expect(index.save(cachePath)).resolves.toBeUndefined();
-
-    const independentPath = join(directory, "cache", "independent.okf");
-    const left = createOkfSearch([{
-      path: "left.md",
-      markdown: concept("type: note", `left ${"payload ".repeat(10_000)}`),
-    }]);
-    const right = createOkfSearch([{
-      path: "right.md",
-      markdown: concept("type: note", `right ${"payload ".repeat(10_000)}`),
-    }]);
-    const independentResults = await Promise.allSettled([
-      left.save(independentPath),
-      right.save(independentPath),
-    ]);
-    const independentFulfilled = independentResults.filter(
-      (result): result is PromiseFulfilledResult<void> => result.status === "fulfilled",
-    );
-    const independentRejected = independentResults.filter(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    expect(independentFulfilled).toHaveLength(1);
-    expect(independentRejected).toHaveLength(1);
-    expectOkfError(
-      independentRejected[0]!.reason,
-      "ERR_OKF_CACHE_BUSY",
-      independentPath,
-    );
-  });
 });

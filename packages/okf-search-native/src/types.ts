@@ -78,9 +78,15 @@ export interface OkfDocumentInput {
   markdown: string;
 }
 
-export interface OkfOpenOptions {
-  readonly cachePath?: string;
-}
+export type OkfOpenOptions =
+  | {
+      readonly cachePath?: string;
+      readonly storage?: "memory";
+    }
+  | {
+      readonly cachePath: string;
+      readonly storage: "mmap";
+    };
 
 export type OkfDiagnosticCode = "ERR_OKF_PARSE" | "ERR_OKF_FIELD";
 
@@ -92,6 +98,9 @@ export type OkfErrorCode =
   | "ERR_OKF_CACHE_INCOMPATIBLE"
   | "ERR_OKF_WRITE"
   | "ERR_OKF_CACHE_BUSY"
+  | "ERR_OKF_INDEX_CLOSED"
+  | "ERR_OKF_PERSISTENCE_BUSY"
+  | "ERR_OKF_CLOSE"
   | "ERR_OKF_INDEX_UNUSABLE"
   | "ERR_OKF_UNSUPPORTED";
 
@@ -152,6 +161,10 @@ export interface OkfLogicalIndexStats {
 export type OkfIndexStorageStats =
   | {
       readonly kind: "in-memory-index-files";
+      readonly sizeInBytes: number;
+    }
+  | {
+      readonly kind: "mapped-index-files";
       readonly sizeInBytes: number;
     }
   | {
@@ -217,6 +230,7 @@ export interface OkfSearchHit {
 export interface OkfSearch {
   indexStats(): OkfIndexStats;
   save(path: string): Promise<void>;
+  close(): Promise<void>;
   ingest(input: OkfDocumentInput): OkfIngestResult;
   listDegradedDocuments(): readonly OkfDegradedDocument[];
   listTypes(): readonly string[];
